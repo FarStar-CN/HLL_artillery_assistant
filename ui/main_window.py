@@ -129,9 +129,13 @@ class MainWindow(QMainWindow):
         self.timer.start(CFG["POLL_MS"])
 
     def _enable_point_selection(self):
-        self.view.wait_point = True
+        self.view.begin_set_a_mode()
 
     def _poll_keyboard(self):
+        if self.view.handle_interaction_shortcuts():
+            self.time.restart()
+            return
+
         delta_time = self.time.elapsed() / 1000.0
         self.time.restart()
 
@@ -208,6 +212,12 @@ class MainWindow(QMainWindow):
         self.labels["y"].setText(f"Azimuth: {y_value:.1f} deg")
         self.labels["mil"].setText(f"MIL: {mil_value:.2f}")
         self.labels["ang"].setText(f"Relative Angle: {angle_value:.1f} deg")
+
+    def set_status_message(self, message):
+        self.statusBar().showMessage(message)
+
+    def clear_status_message(self):
+        self.statusBar().clearMessage()
 
     def closeEvent(self, event):
         remove_file(self.last_screenshot_path)

@@ -2,7 +2,7 @@ import math
 
 import PySide6.QtGui
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsLineItem,
@@ -12,15 +12,18 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
-from config import CFG
+from config import CFG, VK, key_pressed
 from logic import (
+    angle_from_points,
     clamp_distance,
     clamp_to_sector,
     compute_mil,
     compute_target_position,
-    nearest_cardinal_heading,
     pixels_per_meter,
+    point_distance,
+    project_point_to_ray,
     relative_angle,
+    snap_to_cardinal,
 )
 
 
@@ -40,15 +43,27 @@ class MapView(QGraphicsView):
         self.line_item = None
         self.sector_item = None
 
+        self.preview_line_item = None
+        self.preview_sector_item = None
+        self.preview_arrow_item = None
+
         self.pos_a = None
         self.heading_deg = None
         self.sector_ready = False
         self.distance_m = CFG["MAX_X"]
         self.azimuth_deg = 0.0
 
-        self.wait_point = False
+        self.set_a_mode = False
+        self.drawing_ray = False
         self.panning = False
         self.pan_start = QPoint()
+
+        self.drag_release_pos = None
+        self.preview_mouse_pos = None
+        self.preview_angle_deg = None
+        self.shift_locked = False
+        self.snapped_angle_deg = None
+        self.saved_state = None
 
     def load_img(self, path):
         PySide6.QtGui.QImageReader.setAllocationLimit(0)
@@ -67,25 +82,72 @@ class MapView(QGraphicsView):
         self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
 
     def _reset_state(self):
-        self.clear_overlay()
+        self.overlay_item = None
         self.a_item = None
         self.b_item = None
         self.line_item = None
         self.sector_item = None
+        self.preview_line_item = None
+        self.preview_sector_item = None
+        self.preview_arrow_item = None
+
         self.pos_a = None
         self.heading_deg = None
         self.sector_ready = False
         self.distance_m = CFG["MAX_X"]
         self.azimuth_deg = 0.0
+
+        self.set_a_mode = False
+        self.drawing_ray = False
+        self.drag_release_pos = None
+        self.preview_mouse_pos = None
+        self.preview_angle_deg = None
+        self.shift_locked = False
+        self.snapped_angle_deg = None
+        self.saved_state = None
+
+        self.viewport().setCursor(Qt.ArrowCursor)
+        self.main_window.clear_status_message()
         self._notify_sidebar()
+
+    def begin_set_a_mode(self):
+        if self.drawing_ray:
+            self._cancel_ray_setup()
+
+        self.set_a_mode = True
+        self.viewport().setCursor(Qt.CrossCursor)
+        self.main_window.set_status_message(
+            "Click and drag to set A point. Hold Shift to snap. Press Esc to cancel."
+        )
+
+    def handle_interaction_shortcuts(self):
+        if self.drawing_ray:
+            if key_pressed(VK["ESC"]):
+                self._cancel_ray_setup()
+                return True
+
+            if self.preview_mouse_pos is not None:
+                shift_pressed = key_pressed(VK["SHIFT"])
+                should_refresh = shift_pressed != self.shift_locked
+                if shift_pressed and self.snapped_angle_deg is None:
+                    should_refresh = True
+                if should_refresh:
+                    self._update_preview(self.preview_mouse_pos)
+            return True
+
+        if self.set_a_mode:
+            if key_pressed(VK["ESC"]):
+                self._finish_set_a_mode()
+            return True
+
+        return False
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            if self.wait_point:
+            if self.set_a_mode:
                 if not self.pix_item:
                     return QMessageBox.information(self, "Info", "Load a map image first.")
-                self._set_a_point(self.mapToScene(event.position().toPoint()))
-                self.wait_point = False
+                self._start_ray_setup(self.mapToScene(event.position().toPoint()))
                 return
 
             self.panning = True
@@ -96,6 +158,10 @@ class MapView(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self.drawing_ray:
+            self._update_preview(self.mapToScene(event.position().toPoint()))
+            return
+
         if self.panning:
             delta = event.position().toPoint() - self.pan_start
             self.pan_start = event.position().toPoint()
@@ -106,6 +172,10 @@ class MapView(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.drawing_ray:
+            self._finish_ray_setup(self.mapToScene(event.position().toPoint()))
+            return
+
         if event.button() == Qt.LeftButton and self.panning:
             self.panning = False
             self.viewport().setCursor(Qt.ArrowCursor)
@@ -113,32 +183,166 @@ class MapView(QGraphicsView):
 
         super().mouseReleaseEvent(event)
 
+    def _start_ray_setup(self, pos):
+        self.saved_state = self._snapshot_state()
+        self.drawing_ray = True
+        self.preview_mouse_pos = pos
+        self.preview_angle_deg = None
+        self.drag_release_pos = None
+        self.shift_locked = False
+        self.snapped_angle_deg = None
+
+        self._clear_committed_target_items()
+        self._render_a_item(pos)
+        self.pos_a = QPointF(pos)
+
+        self._clear_preview_items()
+        self.main_window.set_status_message("Drag to aim. Hold Shift to snap. Press Esc to cancel.")
+
+    def _finish_ray_setup(self, release_pos):
+        self.drag_release_pos = QPointF(release_pos)
+        self.preview_mouse_pos = QPointF(release_pos)
+
+        if point_distance(
+            self.pos_a.x(),
+            self.pos_a.y(),
+            release_pos.x(),
+            release_pos.y(),
+        ) < CFG["SET_A_MIN_DRAG_PX"]:
+            self._restore_saved_state()
+            self._finish_set_a_mode()
+            return
+
+        final_angle = angle_from_points(
+            self.pos_a.x(),
+            self.pos_a.y(),
+            release_pos.x(),
+            release_pos.y(),
+        )
+        if key_pressed(VK["SHIFT"]):
+            final_angle = self.snapped_angle_deg or snap_to_cardinal(final_angle)
+
+        self.heading_deg = final_angle
+        self.azimuth_deg = final_angle
+        self._clear_preview_items()
+        self._update_sector(create=True)
+        self._update_target()
+        self._notify_sidebar()
+        self._finish_set_a_mode()
+
+    def _cancel_ray_setup(self):
+        self._restore_saved_state()
+        self._finish_set_a_mode()
+
+    def _finish_set_a_mode(self):
+        self.set_a_mode = False
+        self.drawing_ray = False
+        self.preview_mouse_pos = None
+        self.preview_angle_deg = None
+        self.drag_release_pos = None
+        self.shift_locked = False
+        self.snapped_angle_deg = None
+        self.saved_state = None
+        self._clear_preview_items()
+        self.viewport().setCursor(Qt.ArrowCursor)
+        self.main_window.clear_status_message()
+
+    def _snapshot_state(self):
+        if self.pos_a is None:
+            return {
+                "pos_a": None,
+                "heading_deg": None,
+                "azimuth_deg": self.azimuth_deg,
+                "distance_m": self.distance_m,
+            }
+
+        return {
+            "pos_a": QPointF(self.pos_a),
+            "heading_deg": self.heading_deg,
+            "azimuth_deg": self.azimuth_deg,
+            "distance_m": self.distance_m,
+        }
+
+    def _restore_saved_state(self):
+        state = self.saved_state
+        if state is None:
+            return
+
+        self.distance_m = state["distance_m"]
+        self.azimuth_deg = state["azimuth_deg"]
+        self.heading_deg = state["heading_deg"]
+
+        self._clear_committed_target_items()
+        self._clear_preview_items()
+
+        if state["pos_a"] is None:
+            self.pos_a = None
+            self._remove_item("a_item")
+            self._notify_sidebar()
+            return
+
+        self.pos_a = QPointF(state["pos_a"])
+        self._render_a_item(self.pos_a)
+        self._update_sector(create=True)
+        self._update_target()
+        self._notify_sidebar()
+
+    def _update_preview(self, mouse_pos):
+        if not self.drawing_ray or self.pos_a is None:
+            return
+
+        self.preview_mouse_pos = QPointF(mouse_pos)
+        raw_angle = angle_from_points(
+            self.pos_a.x(),
+            self.pos_a.y(),
+            mouse_pos.x(),
+            mouse_pos.y(),
+        )
+
+        if key_pressed(VK["SHIFT"]):
+            self.snapped_angle_deg = snap_to_cardinal(raw_angle)
+            self.shift_locked = True
+            angle = self.snapped_angle_deg
+            preview_x, preview_y = project_point_to_ray(
+                self.pos_a.x(),
+                self.pos_a.y(),
+                mouse_pos.x(),
+                mouse_pos.y(),
+                angle,
+            )
+            preview_end = QPointF(preview_x, preview_y)
+        else:
+            self.shift_locked = False
+            self.snapped_angle_deg = None
+            angle = raw_angle
+            preview_end = QPointF(mouse_pos)
+
+        self.preview_angle_deg = angle
+        self._update_preview_line(preview_end)
+        self._update_preview_arrow(preview_end, angle)
+        self._update_preview_sector(angle)
+        self.main_window.update_sidebar(
+            self.distance_m,
+            angle,
+            compute_mil(self.distance_m),
+            0.0,
+        )
+
+        status_suffix = " (snapped)" if self.shift_locked else ""
+        self.main_window.set_status_message(f"Preview angle: {angle:.1f} deg{status_suffix}")
+
     def _pixels_per_meter(self):
         return pixels_per_meter(self.pix_item.pixmap().width(), CFG["MAP_WIDTH_M"])
 
-    def _set_a_point(self, pos):
-        scene = self.scene()
-        if self.a_item:
-            scene.removeItem(self.a_item)
-
+    def _render_a_item(self, pos):
+        self._remove_item("a_item")
         radius = CFG["R_A"]
         self.a_item = QGraphicsEllipseItem(-radius, -radius, 2 * radius, 2 * radius)
         self.a_item.setBrush(CFG["COLOR_A"])
         self.a_item.setPen(Qt.NoPen)
         self.a_item.setPos(pos)
         self.a_item.setZValue(2)
-        scene.addItem(self.a_item)
-        self.pos_a = pos
-
-        map_width = self.pix_item.pixmap().width()
-        map_height = self.pix_item.pixmap().height()
-        self.heading_deg = nearest_cardinal_heading(pos.x(), pos.y(), map_width, map_height)
-        self.azimuth_deg = self.heading_deg
-        self.distance_m = CFG["MAX_X"]
-
-        self._update_sector(create=not self.sector_ready)
-        self._update_target()
-        self._notify_sidebar()
+        self.scene().addItem(self.a_item)
 
     def _notify_sidebar(self):
         self.main_window.update_sidebar(
@@ -149,8 +353,12 @@ class MapView(QGraphicsView):
         )
 
     def _update_sector(self, create=False):
-        path = self._sector_path()
-        if create:
+        if self.pos_a is None or self.heading_deg is None:
+            return
+
+        path = self._sector_path(self.pos_a, self.heading_deg)
+        if create or self.sector_item is None:
+            self._remove_item("sector_item")
             self.sector_item = self.scene().addPath(
                 path,
                 QPen(Qt.NoPen),
@@ -162,24 +370,24 @@ class MapView(QGraphicsView):
 
         self.sector_item.setPath(path)
 
-    def _sector_path(self):
+    def _sector_path(self, origin, center_angle_deg):
         radius_px = CFG["SECTOR_R_M"] * self._pixels_per_meter()
-        start_angle = self.heading_deg - CFG["SECTOR_ANG"]
-        end_angle = self.heading_deg + CFG["SECTOR_ANG"]
+        start_angle = center_angle_deg - CFG["SECTOR_ANG"]
+        end_angle = center_angle_deg + CFG["SECTOR_ANG"]
 
-        path = QPainterPath(self.pos_a)
+        path = QPainterPath(origin)
         steps = 60
         for index in range(steps + 1):
             radians_value = math.radians(start_angle + (end_angle - start_angle) * index / steps)
             dx = math.sin(radians_value) * radius_px
             dy = -math.cos(radians_value) * radius_px
-            path.lineTo(self.pos_a + QPointF(dx, dy))
+            path.lineTo(origin + QPointF(dx, dy))
 
         path.closeSubpath()
         return path
 
     def _update_target(self):
-        if not self.pos_a:
+        if self.pos_a is None or self.heading_deg is None:
             return
 
         self.azimuth_deg = clamp_to_sector(
@@ -195,29 +403,104 @@ class MapView(QGraphicsView):
             self._pixels_per_meter(),
         )
         pos_b = QPointF(pos_b_x, pos_b_y)
-        scene = self.scene()
 
-        if self.b_item:
-            self.b_item.setPos(pos_b)
-        else:
+        if self.b_item is None:
             radius = CFG["R_B"]
             self.b_item = QGraphicsEllipseItem(-radius, -radius, 2 * radius, 2 * radius)
             self.b_item.setBrush(CFG["COLOR_B"])
             self.b_item.setPen(Qt.NoPen)
             self.b_item.setZValue(2)
-            self.b_item.setPos(pos_b)
-            scene.addItem(self.b_item)
+            self.scene().addItem(self.b_item)
+        self.b_item.setPos(pos_b)
 
         if self.line_item is None:
             self.line_item = QGraphicsLineItem()
             self.line_item.setPen(QPen(CFG["LINE_COLOR"], 2))
             self.line_item.setZValue(1.5)
-            scene.addItem(self.line_item)
+            self.scene().addItem(self.line_item)
 
         self.line_item.setLine(self.pos_a.x(), self.pos_a.y(), pos_b.x(), pos_b.y())
 
+    def _update_preview_line(self, preview_end):
+        if self.preview_line_item is None:
+            self.preview_line_item = QGraphicsLineItem()
+            self.preview_line_item.setPen(QPen(CFG["LINE_COLOR"], 2))
+            self.preview_line_item.setZValue(1.6)
+            self.scene().addItem(self.preview_line_item)
+
+        self.preview_line_item.setLine(
+            self.pos_a.x(),
+            self.pos_a.y(),
+            preview_end.x(),
+            preview_end.y(),
+        )
+
+    def _update_preview_arrow(self, preview_end, angle_deg):
+        arrow_size = CFG["PREVIEW_ARROW_SIZE_PX"]
+        left_wing = self._point_from_angle(preview_end, arrow_size, (angle_deg + 210) % 360)
+        right_wing = self._point_from_angle(preview_end, arrow_size, (angle_deg + 150) % 360)
+
+        path = QPainterPath(left_wing)
+        path.lineTo(preview_end)
+        path.lineTo(right_wing)
+
+        if self.preview_arrow_item is None:
+            self.preview_arrow_item = self.scene().addPath(
+                path,
+                QPen(CFG["LINE_COLOR"], 2),
+            )
+            self.preview_arrow_item.setZValue(1.7)
+            return
+
+        self.preview_arrow_item.setPath(path)
+
+    def _point_from_angle(self, origin, distance_px, angle_deg):
+        radians_value = math.radians(angle_deg)
+        dx = math.sin(radians_value) * distance_px
+        dy = -math.cos(radians_value) * distance_px
+        return origin + QPointF(dx, dy)
+
+    def _update_preview_sector(self, angle_deg):
+        preview_color = QColor(CFG["SECTOR_COLOR"])
+        preview_color.setAlpha(CFG["PREVIEW_SECTOR_ALPHA"])
+        path = self._sector_path(self.pos_a, angle_deg)
+
+        if self.preview_sector_item is None:
+            self.preview_sector_item = self.scene().addPath(
+                path,
+                QPen(Qt.NoPen),
+                QBrush(preview_color),
+            )
+            self.preview_sector_item.setZValue(1.1)
+            return
+
+        self.preview_sector_item.setBrush(QBrush(preview_color))
+        self.preview_sector_item.setPath(path)
+
+    def _clear_committed_target_items(self):
+        self._remove_item("sector_item")
+        self._remove_item("b_item")
+        self._remove_item("line_item")
+        self.sector_ready = False
+
+    def _clear_preview_items(self):
+        self._remove_item("preview_line_item")
+        self._remove_item("preview_sector_item")
+        self._remove_item("preview_arrow_item")
+
+    def _remove_item(self, attr_name):
+        item = getattr(self, attr_name)
+        setattr(self, attr_name, None)
+        if item is None:
+            return
+
+        try:
+            self.scene().removeItem(item)
+        except RuntimeError:
+            pass
+
     def adjust_xy(self, dx, dy, mode):
-        if not self.pos_a:
+        if self.pos_a is None or self.drawing_ray or self.set_a_mode:
             return
 
         if mode == "F1":
@@ -263,12 +546,4 @@ class MapView(QGraphicsView):
         self.scene().addItem(self.overlay_item)
 
     def clear_overlay(self):
-        overlay_item = self.overlay_item
-        self.overlay_item = None
-        if overlay_item is None:
-            return
-
-        try:
-            self.scene().removeItem(overlay_item)
-        except RuntimeError:
-            pass
+        self._remove_item("overlay_item")

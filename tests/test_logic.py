@@ -2,12 +2,16 @@ import math
 import unittest
 
 from logic import (
+    angle_from_points,
     clamp_distance,
     clamp_to_sector,
     compute_mil,
     compute_target_position,
     nearest_cardinal_heading,
+    point_distance,
+    project_point_to_ray,
     relative_angle,
+    snap_to_cardinal,
 )
 
 
@@ -27,6 +31,10 @@ class LogicTests(unittest.TestCase):
         self.assertAlmostEqual(x_value, 300.0)
         self.assertAlmostEqual(y_value, 100.0)
 
+    def test_angle_from_points(self):
+        self.assertAlmostEqual(angle_from_points(0, 0, 0, -10), 0.0)
+        self.assertAlmostEqual(angle_from_points(0, 0, 10, 0), 90.0)
+
     def test_relative_angle(self):
         self.assertEqual(relative_angle(10, 350), 20)
         self.assertEqual(relative_angle(350, 10), -20)
@@ -39,6 +47,18 @@ class LogicTests(unittest.TestCase):
     def test_nearest_cardinal_heading(self):
         heading = nearest_cardinal_heading(100, 0, 1000, 1000)
         self.assertTrue(math.isclose(heading, 180.0))
+
+    def test_snap_to_cardinal(self):
+        self.assertEqual(snap_to_cardinal(20), 0)
+        self.assertEqual(snap_to_cardinal(100), 90)
+
+    def test_project_point_to_ray(self):
+        x_value, y_value = project_point_to_ray(0, 0, 20, -20, 0)
+        self.assertAlmostEqual(x_value, 0.0)
+        self.assertAlmostEqual(y_value, -20.0)
+
+    def test_point_distance(self):
+        self.assertAlmostEqual(point_distance(0, 0, 3, 4), 5.0)
 
 
 if __name__ == "__main__":
