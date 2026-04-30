@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from capture import capture_overlay, remove_file
 from config import CFG, VK, key_pressed
 from logic import compute_mil
+from sync.desktop_sync import DesktopSyncManager
 from ui.map_view import MapView
 
 
@@ -29,6 +30,8 @@ class MainWindow(QMainWindow):
         self.mode = "F1"
         self.last_screenshot_path = None
         self.view = MapView(self)
+        self.sync_manager = DesktopSyncManager(self.project_dir, CFG)
+        self.sync_manager.set_status_callback(self._handle_sync_status)
 
         self.setWindowTitle("HLL_artillery_helper")
         self.resize(1050, 680)
@@ -112,6 +115,44 @@ class MainWindow(QMainWindow):
         btn_clear.clicked.connect(self.view.clear_overlay)
         side_layout.addWidget(btn_clear)
 
+        sync_title = QLabel("Mobile Sync")
+        sync_title.setStyleSheet(
+            """
+            QLabel {
+                font-size: 16px;
+                font-weight: bold;
+                padding: 12px 6px 8px;
+                color: #222;
+            }
+            """
+        )
+        side_layout.addWidget(sync_title)
+
+        self.sync_status = QLabel("Sync: idle")
+        self.sync_status.setWordWrap(True)
+        self.sync_status.setStyleSheet("QLabel { font-size: 13px; padding: 4px 6px; color: #333; }")
+        side_layout.addWidget(self.sync_status)
+
+        self.sync_peer = QLabel("Peer ID: -")
+        self.sync_peer.setWordWrap(True)
+        self.sync_peer.setStyleSheet("QLabel { font-size: 12px; padding: 4px 6px; color: #333; }")
+        side_layout.addWidget(self.sync_peer)
+
+        self.sync_viewer = QLabel("Viewer file: -")
+        self.sync_viewer.setWordWrap(True)
+        self.sync_viewer.setStyleSheet("QLabel { font-size: 12px; padding: 4px 6px; color: #333; }")
+        side_layout.addWidget(self.sync_viewer)
+
+        btn_start_sync = QPushButton("Start Mobile Sync")
+        btn_start_sync.setStyleSheet("QPushButton { padding: 8px; font-size: 14px; }")
+        btn_start_sync.clicked.connect(self._start_mobile_sync)
+        side_layout.addWidget(btn_start_sync)
+
+        btn_stop_sync = QPushButton("Stop Mobile Sync")
+        btn_stop_sync.setStyleSheet("QPushButton { padding: 8px; font-size: 14px; }")
+        btn_stop_sync.clicked.connect(self._stop_mobile_sync)
+        side_layout.addWidget(btn_stop_sync)
+
         side_layout.addStretch(1)
         layout.addWidget(side_panel)
         self.setCentralWidget(container)
@@ -127,6 +168,10 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_keyboard)
         self.timer.start(CFG["POLL_MS"])
+
+        self.sync_timer = QTimer(self)
+        self.sync_timer.timeout.connect(self._publish_sync_state)
+        self.sync_timer.start(int(1000 / CFG["SYNC_STATE_FPS"]))
 
     def _enable_point_selection(self):
         self.view.begin_set_a_mode()
@@ -205,6 +250,63 @@ class MainWindow(QMainWindow):
         self.last_screenshot_path = save_path
         self.view.set_overlay(cropped, opacity=CFG["OPACITY"])
 
+    def _start_mobile_sync(self):
+        started = self.sync_manager.start()
+        if not started:
+            self._refresh_sync_ui()
+            return
+
+        self._refresh_sync_ui()
+        self._publish_sync_assets()
+        self._publish_sync_state()
+
+    def _stop_mobile_sync(self):
+        self.sync_manager.stop()
+        self._refresh_sync_ui()
+
+    def _publish_sync_assets(self):
+        if not self.sync_manager.is_running():
+            return
+
+        state = self.view.export_sync_assets()
+        base_map = state.get("base_map")
+        if base_map is not None:
+            self.sync_manager.publish_asset("base_map", **base_map)
+
+        overlay = state.get("overlay")
+        if overlay is not None:
+            self.sync_manager.publish_asset("overlay", **overlay)
+        else:
+            self.sync_manager.clear_asset("overlay")
+
+    def _publish_sync_state(self):
+        if not self.sync_manager.is_running():
+            return
+
+        payload = self.view.export_sync_state(self.mode)
+        self.sync_manager.publish_state(payload)
+
+    def _handle_sync_status(self, status, error_message):
+        self._refresh_sync_ui()
+        if error_message:
+            self.set_status_message(f"Sync error: {error_message}")
+
+    def _refresh_sync_ui(self):
+        status = self.sync_manager.status
+        peer_id = self.sync_manager.peer_id or "-"
+        viewer_file = self.sync_manager.viewer_file
+        viewer_text = str(viewer_file) if viewer_file else "-"
+
+        status_line = f"Sync: {status}"
+        if self.sync_manager.connection_label:
+            status_line += f" ({self.sync_manager.connection_label})"
+        if self.sync_manager.last_error:
+            status_line += f" | {self.sync_manager.last_error}"
+
+        self.sync_status.setText(status_line)
+        self.sync_peer.setText(f"Peer ID: {peer_id}")
+        self.sync_viewer.setText(f"Viewer file: {viewer_text}")
+
     def update_sidebar(self, x_value, y_value, mil_value, angle_value):
         mode_name = "Gunner" if self.mode == "F1" else "Loader"
         self.labels["mode"].setText(f"Mode: {mode_name}")
@@ -220,5 +322,6 @@ class MainWindow(QMainWindow):
         self.statusBar().clearMessage()
 
     def closeEvent(self, event):
+        self.sync_manager.stop()
         remove_file(self.last_screenshot_path)
         event.accept()

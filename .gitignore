@@ -24,3 +24,6 @@ Thumbs.db
 
 # Runtime-generated images
 screenshot_*.png
+
+# Generated sync sessions
+sessions/

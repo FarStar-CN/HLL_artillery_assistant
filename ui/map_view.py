@@ -1,7 +1,7 @@
 import math
 
 import PySide6.QtGui
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
+from PySide6.QtCore import QBuffer, QByteArray, QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
@@ -351,6 +351,76 @@ class MapView(QGraphicsView):
             compute_mil(self.distance_m),
             relative_angle(self.azimuth_deg, self.heading_deg),
         )
+
+    def export_sync_state(self, mode):
+        map_width = 0
+        map_height = 0
+        if self.pix_item is not None:
+            map_width = self.pix_item.pixmap().width()
+            map_height = self.pix_item.pixmap().height()
+
+        a_point = self._normalize_scene_point(self.pos_a, map_width, map_height)
+        b_point = None
+        if self.b_item is not None:
+            b_point = self._normalize_scene_point(self.b_item.pos(), map_width, map_height)
+
+        return {
+            "mode": mode,
+            "map": {
+                "widthPx": map_width,
+                "heightPx": map_height,
+            },
+            "view": {
+                "distanceM": self.distance_m,
+                "azimuthDeg": self.azimuth_deg,
+                "headingDeg": self.heading_deg,
+                "mil": compute_mil(self.distance_m),
+                "relativeAngleDeg": relative_angle(self.azimuth_deg, self.heading_deg),
+                "sectorAngleDeg": CFG["SECTOR_ANG"],
+                "sectorRadiusNorm": CFG["SECTOR_R_M"] / CFG["MAP_WIDTH_M"],
+                "overlayOpacity": CFG["OPACITY"],
+            },
+            "entities": {
+                "a": a_point,
+                "b": b_point,
+            },
+        }
+
+    def export_sync_assets(self):
+        assets = {
+            "base_map": None,
+            "overlay": None,
+        }
+
+        if self.pix_item is not None:
+            assets["base_map"] = self._pixmap_payload(self.pix_item.pixmap())
+        if self.overlay_item is not None:
+            assets["overlay"] = self._pixmap_payload(self.overlay_item.pixmap())
+        return assets
+
+    def _pixmap_payload(self, pixmap):
+        image_bytes = self._pixmap_to_png_bytes(pixmap)
+        return {
+            "image_bytes": image_bytes,
+            "width_px": pixmap.width(),
+            "height_px": pixmap.height(),
+            "mime_type": "image/png",
+        }
+
+    def _pixmap_to_png_bytes(self, pixmap):
+        byte_array = QByteArray()
+        buffer = QBuffer(byte_array)
+        buffer.open(QBuffer.WriteOnly)
+        pixmap.save(buffer, "PNG")
+        return bytes(byte_array)
+
+    def _normalize_scene_point(self, point, map_width, map_height):
+        if point is None or map_width <= 0 or map_height <= 0:
+            return None
+        return {
+            "x": point.x() / map_width,
+            "y": point.y() / map_height,
+        }
 
     def _update_sector(self, create=False):
         if self.pos_a is None or self.heading_deg is None:

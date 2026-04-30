@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>HLL Mobile Viewer</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #08111f;
+      --panel: rgba(6, 16, 30, 0.84);
+      --line: rgba(115, 197, 255, 0.24);
+      --text: #eef5ff;
+      --muted: #8ea6bf;
+      --accent: #71d8ff;
+      --ok: #66f0a9;
+      --warn: #ffcd70;
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background:
+        radial-gradient(circle at top, rgba(38, 79, 145, 0.32), transparent 38%),
+        linear-gradient(180deg, #09111f 0%, #050912 100%);
+      color: var(--text);
+      font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+      overflow: hidden;
+    }
+
+    #app {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+
+    .hud {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      top: 12px;
+      display: grid;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      backdrop-filter: blur(14px);
+      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+    }
+
+    .session {
+      padding: 12px 14px;
+      display: grid;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    .session-row {
+      display: grid;
+      gap: 6px;
+    }
+
+    .label {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .value {
+      font-size: 13px;
+      word-break: break-all;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+    }
+
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(144, 186, 255, 0.2);
+      background: rgba(6, 14, 28, 0.9);
+      color: var(--text);
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      background: linear-gradient(135deg, #0eb7f0, #5df2c5);
+      color: #04111f;
+      font: inherit;
+      font-weight: 700;
+    }
+
+    .metrics {
+      margin-top: auto;
+      padding: 12px 14px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 14px;
+    }
+
+    .metric {
+      display: grid;
+      gap: 4px;
+    }
+
+    .metric .value {
+      font-size: 14px;
+    }
+
+    .status-ok {
+      color: var(--ok);
+    }
+
+    .status-warn {
+      color: var(--warn);
+    }
+
+    .diag {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      display: grid;
+      gap: 6px;
+      pointer-events: none;
+    }
+
+    .diag .panel {
+      padding: 10px 14px;
+      display: grid;
+      gap: 4px;
+      font-size: 11px;
+    }
+
+    .diag .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .diag .key {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .diag .val {
+      color: var(--text);
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <canvas id="scene"></canvas>
+    <div class="hud">
+      <div class="panel session">
+        <div class="session-row">
+          <div class="label">Connection</div>
+          <div class="value" id="statusText">Idle</div>
+        </div>
+        <div class="session-row">
+          <div class="label">Peer ID</div>
+          <div class="value" id="peerText">__DEFAULT_PEER_ID__</div>
+        </div>
+        <div class="controls">
+          <input id="peerInput" value="__DEFAULT_PEER_ID__" spellcheck="false" autocomplete="off">
+          <button id="connectBtn" type="button">Connect</button>
+        </div>
+      </div>
+    </div>
+    <div class="diag" id="diagPanel" style="display:none;">
+      <div class="panel">
+        <div class="row"><span class="key">ICE State</span><span class="val" id="iceState">-</span></div>
+        <div class="row"><span class="key">Elapsed</span><span class="val" id="connTimer">0s</span></div>
+        <div class="row"><span class="key">Last Error</span><span class="val" id="lastError">-</span></div>
+      </div>
+    </div>
+    <div class="hud" style="top:auto; bottom:12px;">
+      <div class="panel metrics">
+        <div class="metric"><div class="label">Mode</div><div class="value" id="modeValue">-</div></div>
+        <div class="metric"><div class="label">Distance</div><div class="value" id="distanceValue">-</div></div>
+        <div class="metric"><div class="label">Azimuth</div><div class="value" id="azimuthValue">-</div></div>
+        <div class="metric"><div class="label">MIL</div><div class="value" id="milValue">-</div></div>
+        <div class="metric"><div class="label">Relative</div><div class="value" id="relativeValue">-</div></div>
+        <div class="metric"><div class="label">State Seq</div><div class="value" id="seqValue">-</div></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
+  <script>
+    const signalConfig = {
+      host: "__SIGNAL_HOST__",
+      port: Number("__SIGNAL_PORT__"),
+      path: "__SIGNAL_PATH__",
+      secure: __SIGNAL_SECURE__,
+    };
+
+    const canvas = document.getElementById("scene");
+    const ctx = canvas.getContext("2d");
+    const statusText = document.getElementById("statusText");
+    const peerText = document.getElementById("peerText");
+    const peerInput = document.getElementById("peerInput");
+    const connectBtn = document.getElementById("connectBtn");
+    const metrics = {
+      mode: document.getElementById("modeValue"),
+      distance: document.getElementById("distanceValue"),
+      azimuth: document.getElementById("azimuthValue"),
+      mil: document.getElementById("milValue"),
+      relative: document.getElementById("relativeValue"),
+      seq: document.getElementById("seqValue"),
+    };
+
+    const stateCache = {
+      seq: 0,
+      payload: null,
+      assets: {
+        base_map: null,
+        overlay: null,
+      },
+    };
+
+    const viewport = {
+      scale: 1,
+      offsetX: 0,
+      offsetY: 0,
+      dragging: false,
+      pointers: new Map(),
+      pinchStartDistance: 0,
+      pinchStartScale: 1,
+      dragStartOffsetX: 0,
+      dragStartOffsetY: 0,
+      dragStartX: 0,
+      dragStartY: 0,
+    };
+
+    let peer = null;
+    let connection = null;
+    let connTimerId = null;
+    let connStartMs = 0;
+    const iceStateEl = document.getElementById("iceState");
+    const connTimerEl = document.getElementById("connTimer");
+    const lastErrorEl = document.getElementById("lastError");
+    const diagPanel = document.getElementById("diagPanel");
+
+    function showDiag(visible) {
+      diagPanel.style.display = visible ? "grid" : "none";
+    }
+
+    function setIceState(state) {
+      iceStateEl.textContent = state || "-";
+      const color = state === "connected" || state === "completed" ? "var(--ok)" :
+                    state === "failed" || state === "disconnected" ? "#ff7070" : "var(--warn)";
+      iceStateEl.style.color = color;
+    }
+
+    function setLastError(msg) {
+      lastErrorEl.textContent = msg || "-";
+    }
+
+    function startConnTimer() {
+      connStartMs = Date.now();
+      connTimerEl.textContent = "0s";
+      if (connTimerId) clearInterval(connTimerId);
+      connTimerId = setInterval(() => {
+        const sec = Math.floor((Date.now() - connStartMs) / 1000);
+        connTimerEl.textContent = `${sec}s`;
+      }, 1000);
+    }
+
+    function stopConnTimer() {
+      if (connTimerId) {
+        clearInterval(connTimerId);
+        connTimerId = null;
+      }
+    }
+
+    function monitorIceState(conn) {
+      let pc = null;
+      try {
+        pc = conn.peerConnection || (conn._connection && conn._connection.peerConnection) || null;
+      } catch (_) {}
+      if (!pc) {
+        setIceState("(unavailable)");
+        return;
+      }
+      setIceState(pc.iceConnectionState || "unknown");
+      pc.addEventListener("iceconnectionstatechange", () => {
+        setIceState(pc.iceConnectionState);
+      });
+    }
+
+    function resizeCanvas() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(window.innerWidth * dpr);
+      canvas.height = Math.floor(window.innerHeight * dpr);
+      canvas.style.width = `${window.innerWidth}px`;
+      canvas.style.height = `${window.innerHeight}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      draw();
+    }
+
+    function setStatus(text, mode = "warn") {
+      statusText.textContent = text;
+      statusText.className = `value status-${mode}`;
+    }
+
+    function resetPeer() {
+      stopConnTimer();
+      if (connection) {
+        connection.close();
+        connection = null;
+      }
+      if (peer) {
+        peer.destroy();
+        peer = null;
+      }
+      showDiag(false);
+      setIceState("-");
+      setLastError("-");
+    }
+
+    function connectToSource() {
+      const targetPeer = (new URLSearchParams(window.location.search).get("peer") || peerInput.value || "").trim();
+      if (!targetPeer) {
+        setStatus("Peer ID is required", "warn");
+        return;
+      }
+
+      resetPeer();
+      peerText.textContent = targetPeer;
+      setStatus("Connecting to signaling server...", "warn");
+      showDiag(true);
+      setIceState("connecting");
+      setLastError("-");
+      startConnTimer();
+
+      peer = new Peer(undefined, { ...signalConfig, debug: 3 });
+
+      peer.on("open", () => {
+        setStatus("Peer ready, opening data channel...", "warn");
+        setIceState("checking");
+        connection = peer.connect(targetPeer, {
+          reliable: true,
+          serialization: "json",
+        });
+        bindConnection();
+      });
+
+      peer.on("error", (error) => {
+        const msg = String(error);
+        setStatus(`Peer error: ${msg}`, "warn");
+        setLastError(msg);
+        setIceState("failed");
+        stopConnTimer();
+      });
+
+      peer.on("disconnected", () => {
+        setStatus("Peer disconnected from signaling", "warn");
+        setIceState("disconnected");
+        stopConnTimer();
+      });
+    }
+
+    function bindConnection() {
+      if (!connection) {
+        return;
+      }
+
+      monitorIceState(connection);
+
+      connection.on("open", () => {
+        setStatus("Connected", "ok");
+        setIceState("connected");
+        stopConnTimer();
+      });
+
+      connection.on("data", (message) => {
+        handleMessage(message);
+      });
+
+      connection.on("close", () => {
+        setStatus("Connection closed", "warn");
+        setIceState("closed");
+        stopConnTimer();
+      });
+
+      connection.on("error", (error) => {
+        const msg = String(error);
+        setStatus(`Connection error: ${msg}`, "warn");
+        setLastError(msg);
+        setIceState("failed");
+        stopConnTimer();
+      });
+    }
+
+    function handleMessage(message) {
+      if (!message || typeof message !== "object") {
+        return;
+      }
+
+      if (message.type === "hello") {
+        setStatus("Connected", "ok");
+        return;
+      }
+
+      if (message.type === "asset") {
+        loadAsset(message.name, message.mimeType, message.data);
+        return;
+      }
+
+      if (message.type === "clear_asset") {
+        stateCache.assets[message.name] = null;
+        draw();
+        return;
+      }
+
+      if (message.type === "state") {
+        stateCache.seq = message.seq || stateCache.seq;
+        stateCache.payload = message.payload;
+        updateMetricPanel();
+        draw();
+      }
+    }
+
+    function loadAsset(name, mimeType, base64Data) {
+      const image = new Image();
+      image.onload = () => {
+        stateCache.assets[name] = image;
+        draw();
+      };
+      image.src = `data:${mimeType};base64,${base64Data}`;
+    }
+
+    function updateMetricPanel() {
+      const payload = stateCache.payload;
+      if (!payload) {
+        return;
+      }
+
+      metrics.mode.textContent = payload.mode || "-";
+      metrics.distance.textContent = `${payload.view.distanceM.toFixed(1)} m`;
+      metrics.azimuth.textContent = `${payload.view.azimuthDeg.toFixed(1)} deg`;
+      metrics.mil.textContent = payload.view.mil.toFixed(2);
+      metrics.relative.textContent = `${payload.view.relativeAngleDeg.toFixed(1)} deg`;
+      metrics.seq.textContent = String(stateCache.seq || 0);
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      const payload = stateCache.payload;
+      if (!payload) {
+        drawEmptyMessage();
+        return;
+      }
+
+      ctx.save();
+      ctx.translate(viewport.offsetX, viewport.offsetY);
+      ctx.scale(viewport.scale, viewport.scale);
+
+      const mapWidth = payload.map.widthPx || 1;
+      const mapHeight = payload.map.heightPx || 1;
+      const baseMap = stateCache.assets.base_map;
+      const overlay = stateCache.assets.overlay;
+
+      if (baseMap) {
+        ctx.drawImage(baseMap, 0, 0, mapWidth, mapHeight);
+      } else {
+        ctx.fillStyle = "#182433";
+        ctx.fillRect(0, 0, mapWidth, mapHeight);
+      }
+
+      if (overlay) {
+        ctx.save();
+        ctx.globalAlpha = payload.view.overlayOpacity || 0.5;
+        ctx.drawImage(overlay, 0, 0, mapWidth, mapHeight);
+        ctx.restore();
+      }
+
+      const a = denormalize(payload.entities.a, mapWidth, mapHeight);
+      const b = denormalize(payload.entities.b, mapWidth, mapHeight);
+      if (a) {
+        drawSector(a, payload.view.headingDeg, payload.view.sectorAngleDeg, payload.view.sectorRadiusNorm * mapWidth);
+      }
+      if (a && b) {
+        drawLine(a, b);
+        drawPoint(b.x, b.y, 30, "rgba(255, 0, 0, 0.72)");
+      }
+      if (a) {
+        drawPoint(a.x, a.y, 25, "rgba(0, 255, 0, 0.8)");
+      }
+
+      ctx.restore();
+    }
+
+    function drawEmptyMessage() {
+      ctx.save();
+      ctx.fillStyle = "rgba(255,255,255,0.72)";
+      ctx.font = "15px SF Mono, monospace";
+      ctx.fillText("Waiting for synchronized map state...", 20, 40);
+      ctx.restore();
+    }
+
+    function drawSector(origin, headingDeg, sectorAngleDeg, radiusPx) {
+      if (headingDeg == null) {
+        return;
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(origin.x, origin.y);
+      const start = degToRad(headingDeg - sectorAngleDeg);
+      const end = degToRad(headingDeg + sectorAngleDeg);
+      for (let step = 0; step <= 60; step += 1) {
+        const angle = start + ((end - start) * step) / 60;
+        const x = origin.x + Math.sin(angle) * radiusPx;
+        const y = origin.y - Math.cos(angle) * radiusPx;
+        ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = "rgba(60, 170, 255, 0.26)";
+      ctx.fill();
+    }
+
+    function drawLine(a, b) {
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(70, 160, 255, 0.9)";
+      ctx.stroke();
+    }
+
+    function drawPoint(x, y, radius, color) {
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+
+    function denormalize(point, width, height) {
+      if (!point) {
+        return null;
+      }
+      return {
+        x: point.x * width,
+        y: point.y * height,
+      };
+    }
+
+    function degToRad(value) {
+      return (value * Math.PI) / 180;
+    }
+
+    function pointerDistance() {
+      const points = [...viewport.pointers.values()];
+      if (points.length < 2) {
+        return 0;
+      }
+      const dx = points[0].x - points[1].x;
+      const dy = points[0].y - points[1].y;
+      return Math.hypot(dx, dy);
+    }
+
+    canvas.addEventListener("pointerdown", (event) => {
+      canvas.setPointerCapture(event.pointerId);
+      viewport.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (viewport.pointers.size === 1) {
+        viewport.dragging = true;
+        viewport.dragStartX = event.clientX;
+        viewport.dragStartY = event.clientY;
+        viewport.dragStartOffsetX = viewport.offsetX;
+        viewport.dragStartOffsetY = viewport.offsetY;
+      } else if (viewport.pointers.size === 2) {
+        viewport.pinchStartDistance = pointerDistance();
+        viewport.pinchStartScale = viewport.scale;
+      }
+    });
+
+    canvas.addEventListener("pointermove", (event) => {
+      if (!viewport.pointers.has(event.pointerId)) {
+        return;
+      }
+      viewport.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+      if (viewport.pointers.size === 1 && viewport.dragging) {
+        viewport.offsetX = viewport.dragStartOffsetX + (event.clientX - viewport.dragStartX);
+        viewport.offsetY = viewport.dragStartOffsetY + (event.clientY - viewport.dragStartY);
+        draw();
+      } else if (viewport.pointers.size >= 2) {
+        const distance = pointerDistance();
+        if (viewport.pinchStartDistance > 0) {
+          const nextScale = viewport.pinchStartScale * (distance / viewport.pinchStartDistance);
+          viewport.scale = Math.min(Math.max(nextScale, 0.2), 6);
+          draw();
+        }
+      }
+    });
+
+    function releasePointer(pointerId) {
+      viewport.pointers.delete(pointerId);
+      if (viewport.pointers.size === 0) {
+        viewport.dragging = false;
+      }
+      if (viewport.pointers.size < 2) {
+        viewport.pinchStartDistance = 0;
+      }
+    }
+
+    canvas.addEventListener("pointerup", (event) => releasePointer(event.pointerId));
+    canvas.addEventListener("pointercancel", (event) => releasePointer(event.pointerId));
+
+    canvas.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      const delta = event.deltaY < 0 ? 1.08 : 0.92;
+      viewport.scale = Math.min(Math.max(viewport.scale * delta, 0.2), 6);
+      draw();
+    }, { passive: false });
+
+    connectBtn.addEventListener("click", connectToSource);
+    window.addEventListener("resize", resizeCanvas);
+
+    resizeCanvas();
+
+    const initialPeer = new URLSearchParams(window.location.search).get("peer") || "__DEFAULT_PEER_ID__";
+    if (initialPeer && initialPeer !== "__DEFAULT_PEER_ID__") {
+      peerInput.value = initialPeer;
+      connectToSource();
+    }
+  </script>
+</body>
+</html>
