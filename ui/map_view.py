@@ -17,6 +17,7 @@ from logic import (
     angle_from_points,
     clamp_distance,
     clamp_to_sector,
+    compute_effective_distance,
     compute_mil,
     compute_target_position,
     pixels_per_meter,
@@ -52,6 +53,13 @@ class MapView(QGraphicsView):
         self.sector_ready = False
         self.distance_m = CFG["MAX_X"]
         self.azimuth_deg = 0.0
+        self.tilt_angle = 0.0
+
+        self._calc_mode = "STD"
+        self._saved = {
+            "STD": {"pos_a": None, "pos_b": None, "distance_m": CFG["MAX_X"], "azimuth_deg": 0.0, "heading_deg": None},
+            "SPG": {"pos_a": None, "pos_b": None, "distance_m": CFG["MAX_X"], "azimuth_deg": 0.0, "heading_deg": None, "tilt_angle": 0.0},
+        }
 
         self.set_a_mode = False
         self.drawing_ray = False
@@ -96,6 +104,13 @@ class MapView(QGraphicsView):
         self.sector_ready = False
         self.distance_m = CFG["MAX_X"]
         self.azimuth_deg = 0.0
+        self.tilt_angle = 0.0
+
+        self._calc_mode = "STD"
+        self._saved = {
+            "STD": {"pos_a": None, "pos_b": None, "distance_m": CFG["MAX_X"], "azimuth_deg": 0.0, "heading_deg": None},
+            "SPG": {"pos_a": None, "pos_b": None, "distance_m": CFG["MAX_X"], "azimuth_deg": 0.0, "heading_deg": None, "tilt_angle": 0.0},
+        }
 
         self.set_a_mode = False
         self.drawing_ray = False
@@ -108,6 +123,42 @@ class MapView(QGraphicsView):
 
         self.viewport().setCursor(Qt.ArrowCursor)
         self.main_window.clear_status_message()
+        self._notify_sidebar()
+
+    @property
+    def calc_mode(self):
+        return self._calc_mode
+
+    def switch_calc_mode(self, new_mode):
+        if new_mode == self._calc_mode:
+            return
+        old_mode = self._calc_mode
+        self._saved[old_mode] = {
+            "pos_a": self.pos_a,
+            "pos_b": self.b_item.pos() if self.b_item else None,
+            "distance_m": self.distance_m,
+            "azimuth_deg": self.azimuth_deg,
+            "heading_deg": self.heading_deg,
+        }
+        if old_mode == "SPG":
+            self._saved["SPG"]["tilt_angle"] = getattr(self, "tilt_angle", 0.0)
+
+        self._calc_mode = new_mode
+        prev = self._saved[new_mode]
+        self.pos_a = prev["pos_a"]
+        self.heading_deg = prev["heading_deg"]
+        self.distance_m = prev["distance_m"]
+        self.azimuth_deg = prev["azimuth_deg"]
+        if new_mode == "SPG":
+            self.tilt_angle = prev.get("tilt_angle", 0.0)
+
+        self._clear_committed_target_items()
+        self._clear_preview_items()
+        self._remove_item("a_item")
+        if self.pos_a is not None:
+            self._render_a_item(self.pos_a)
+        self._update_sector(create=True)
+        self._update_target()
         self._notify_sidebar()
 
     def begin_set_a_mode(self):
@@ -321,15 +372,23 @@ class MapView(QGraphicsView):
         self._update_preview_line(preview_end)
         self._update_preview_arrow(preview_end, angle)
         self._update_preview_sector(angle)
+        d_eff = self._effective_distance()
         self.main_window.update_sidebar(
             self.distance_m,
             angle,
-            compute_mil(self.distance_m),
+            compute_mil(d_eff),
             0.0,
+            getattr(self, "tilt_angle", 0.0),
         )
 
         status_suffix = " (snapped)" if self.shift_locked else ""
         self.main_window.set_status_message(f"Preview angle: {angle:.1f} deg{status_suffix}")
+
+    def _effective_distance(self):
+        """SPG 模式下返回修正后的有效距离，STD 返回原始距离"""
+        if self._calc_mode == "SPG":
+            return compute_effective_distance(self.distance_m, self.tilt_angle)
+        return self.distance_m
 
     def _pixels_per_meter(self):
         return pixels_per_meter(self.pix_item.pixmap().width(), CFG["MAP_WIDTH_M"])
@@ -345,14 +404,16 @@ class MapView(QGraphicsView):
         self.scene().addItem(self.a_item)
 
     def _notify_sidebar(self):
+        d_eff = self._effective_distance()
         self.main_window.update_sidebar(
             self.distance_m,
             self.azimuth_deg,
-            compute_mil(self.distance_m),
+            compute_mil(d_eff),
             relative_angle(self.azimuth_deg, self.heading_deg),
+            getattr(self, "tilt_angle", 0.0),
         )
 
-    def export_sync_state(self, mode):
+    def export_sync_state(self, role, calc_mode):
         map_width = 0
         map_height = 0
         if self.pix_item is not None:
@@ -364,8 +425,10 @@ class MapView(QGraphicsView):
         if self.b_item is not None:
             b_point = self._normalize_scene_point(self.b_item.pos(), map_width, map_height)
 
-        return {
-            "mode": mode,
+        d_eff = self._effective_distance()
+        result = {
+            "mode": f"{calc_mode} · {'Gunner' if role == 'F1' else 'Loader'}" if calc_mode == "STD" else calc_mode,
+            "calcMode": calc_mode,
             "map": {
                 "widthPx": map_width,
                 "heightPx": map_height,
@@ -374,17 +437,19 @@ class MapView(QGraphicsView):
                 "distanceM": self.distance_m,
                 "azimuthDeg": self.azimuth_deg,
                 "headingDeg": self.heading_deg,
-                "mil": compute_mil(self.distance_m),
+                "mil": compute_mil(d_eff),
                 "relativeAngleDeg": relative_angle(self.azimuth_deg, self.heading_deg),
                 "sectorAngleDeg": CFG["SECTOR_ANG"],
                 "sectorRadiusNorm": CFG["SECTOR_R_M"] / CFG["MAP_WIDTH_M"],
                 "overlayOpacity": CFG["OPACITY"],
+                "tiltAngleDeg": getattr(self, "tilt_angle", 0.0),
             },
             "entities": {
                 "a": a_point,
                 "b": b_point,
             },
         }
+        return result
 
     def export_sync_assets(self):
         assets = {
@@ -470,7 +535,7 @@ class MapView(QGraphicsView):
         pos_b_x, pos_b_y = compute_target_position(
             self.pos_a.x(),
             self.pos_a.y(),
-            self.distance_m,
+            self._effective_distance(),
             self.azimuth_deg,
             self._pixels_per_meter(),
         )

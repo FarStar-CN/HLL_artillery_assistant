@@ -209,6 +209,7 @@
         <div class="metric"><span class="key">Azimuth</span><span class="val" id="azimuthValue">-</span></div>
         <div class="metric"><span class="key">MIL</span><span class="val" id="milValue">-</span></div>
         <div class="metric"><span class="key">Relative</span><span class="val" id="relativeValue">-</span></div>
+        <div class="metric"><span class="key">Tilt</span><span class="val" id="tiltValue">-</span></div>
         <div class="metric"><span class="key">State Seq</span><span class="val" id="seqValue">-</span></div>
       </div>
       <div class="sidebar-section">
@@ -251,6 +252,7 @@
       azimuth: document.getElementById("azimuthValue"),
       mil: document.getElementById("milValue"),
       relative: document.getElementById("relativeValue"),
+      tilt: document.getElementById("tiltValue"),
       seq: document.getElementById("seqValue"),
     };
 
@@ -582,6 +584,7 @@
       metrics.azimuth.textContent = `${payload.view.azimuthDeg.toFixed(1)} deg`;
       metrics.mil.textContent = payload.view.mil.toFixed(2);
       metrics.relative.textContent = `${payload.view.relativeAngleDeg.toFixed(1)} deg`;
+      metrics.tilt.textContent = `${(payload.view.tiltAngleDeg || 0).toFixed(1)}°`;
       metrics.seq.textContent = String(stateCache.seq || 0);
     }
 

@@ -72,5 +72,19 @@ def relative_angle(angle_deg, heading_deg):
     return (angle_deg - heading_deg + 540) % 360 - 180
 
 
+MIL_K = 1500.0 / 356.0  # 米→MIL 转换系数：每 MIL 对应约 4.2135 米
+
+
 def compute_mil(distance_m):
-    return 1002.0 - distance_m / (1500.0 / 356.0)
+    """STD 距离→MIL 公式"""
+    return 1002.0 - distance_m / MIL_K
+
+
+def inverse_mil(mil_value):
+    """MIL→距离 反函数"""
+    return MIL_K * (1002.0 - mil_value)
+
+
+def compute_effective_distance(distance_m, delta_mil):
+    """SPG 有效距离 = 原始距离 - k * Δmil"""
+    return distance_m - MIL_K * delta_mil

@@ -31,6 +31,7 @@ class MainWindow(QMainWindow):
         self.time = QElapsedTimer()
         self.time.start()
         self.mode = "F1"
+        self.calc_mode = "STD"
         self.last_screenshot_path = None
         self.view = MapView(self)
         self.sync_manager = DesktopSyncManager(self.project_dir, CFG)
@@ -98,6 +99,20 @@ class MainWindow(QMainWindow):
         side_layout = QVBoxLayout(side)
         side_layout.setSpacing(8)
 
+        # ── Mode toggle ──
+        toggle_row = QHBoxLayout()
+        self._btn_std = QPushButton("STD")
+        self._btn_std.setCheckable(True)
+        self._btn_std.setChecked(True)
+        self._btn_std.clicked.connect(lambda: self._switch_calc_mode("STD"))
+        toggle_row.addWidget(self._btn_std)
+
+        self._btn_spg = QPushButton("SPG")
+        self._btn_spg.setCheckable(True)
+        self._btn_spg.clicked.connect(lambda: self._switch_calc_mode("SPG"))
+        toggle_row.addWidget(self._btn_spg)
+        side_layout.addLayout(toggle_row)
+
         # ── Telemetry ──
         grp_telem = QGroupBox("Telemetry")
         telem_form = QFormLayout(grp_telem)
@@ -105,7 +120,7 @@ class MainWindow(QMainWindow):
 
         self._metric = {}
         for key, label in [("mode", "Mode"), ("x", "Distance"), ("y", "Azimuth"),
-                           ("mil", "MIL"), ("ang", "Relative")]:
+                           ("mil", "MIL"), ("ang", "Relative"), ("tilt", "Tilt")]:
             val_lbl = QLabel("-")
             val_lbl.setStyleSheet("font-size: 15px; font-weight: 700; color: #e8f4ff;")
             self._metric[key] = val_lbl
@@ -307,11 +322,21 @@ class MainWindow(QMainWindow):
         else:
             self.sync_manager.clear_asset("overlay")
 
+    def _switch_calc_mode(self, new_mode):
+        if new_mode == self.calc_mode:
+            return
+        self.calc_mode = new_mode
+        self._btn_std.setChecked(new_mode == "STD")
+        self._btn_spg.setChecked(new_mode == "SPG")
+        self.view.switch_calc_mode(new_mode)
+        self._publish_sync_assets()
+        self._publish_sync_state()
+
     def _publish_sync_state(self):
         if not self.sync_manager.is_running():
             return
 
-        payload = self.view.export_sync_state(self.mode)
+        payload = self.view.export_sync_state(self.mode, self.calc_mode)
         self.sync_manager.publish_state(payload)
 
     def _handle_sync_status(self, status, error_message):
@@ -346,19 +371,23 @@ class MainWindow(QMainWindow):
         self._sync_peer_lbl.setText(f"Peer: {peer_id}")
         self._sync_viewer_lbl.setText(f"Viewer: {viewer_text}")
 
-    def _update_metric_display(self, x_value, y_value, mil_value, angle_value):
-        mode_name = "Gunner" if self.mode == "F1" else "Loader"
+    def _update_metric_display(self, x_value, y_value, mil_value, angle_value, tilt_value=0.0):
+        if self.calc_mode == "STD":
+            mode_name = f"STD · {'Gunner' if self.mode == 'F1' else 'Loader'}"
+            mode_color = '#71d8ff' if self.mode == 'F1' else '#ffcd70'
+        else:
+            mode_name = "SPG"
+            mode_color = '#90ffb0'
         self._metric["mode"].setText(mode_name)
-        self._metric["mode"].setStyleSheet(
-            f"font-size: 15px; font-weight: 700; color: {'#71d8ff' if self.mode == 'F1' else '#ffcd70'};"
-        )
+        self._metric["mode"].setStyleSheet(f"font-size: 15px; font-weight: 700; color: {mode_color};")
         self._metric["x"].setText(f"{x_value:.1f} m")
         self._metric["y"].setText(f"{y_value:.1f}°")
         self._metric["mil"].setText(f"{mil_value:.2f}")
         self._metric["ang"].setText(f"{angle_value:.1f}°")
+        self._metric["tilt"].setText(f"{tilt_value:.1f}°")
 
-    def update_sidebar(self, x_value, y_value, mil_value, angle_value):
-        self._update_metric_display(x_value, y_value, mil_value, angle_value)
+    def update_sidebar(self, x_value, y_value, mil_value, angle_value, tilt_value=0.0):
+        self._update_metric_display(x_value, y_value, mil_value, angle_value, tilt_value)
 
     def set_status_message(self, message):
         self.statusBar().showMessage(message)
