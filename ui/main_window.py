@@ -19,6 +19,7 @@ from config import CFG, VK, key_pressed
 from logic import compute_mil
 from sync.desktop_sync import DesktopSyncManager
 from ui.map_view import MapView
+from ui.settings_dialog import SettingsDialog
 
 
 class MainWindow(QMainWindow):
@@ -161,6 +162,7 @@ class MainWindow(QMainWindow):
     def _build_menu(self):
         menu = self.menuBar().addMenu("File")
         menu.addAction(QAction("Open...", self, shortcut="Ctrl+O", triggered=self._open_map))
+        menu.addAction(QAction("Settings...", self, shortcut="Ctrl+,", triggered=self._open_settings))
         menu.addSeparator()
         menu.addAction(QAction("Exit", self, shortcut="Ctrl+Q", triggered=self.close))
 
@@ -230,6 +232,10 @@ class MainWindow(QMainWindow):
         if path:
             self.view.load_img(path)
             self._publish_sync_assets()
+
+    def _open_settings(self):
+        dialog = SettingsDialog(self, self.project_dir)
+        dialog.exec()
 
     def _capture_and_overlay(self):
         try:

@@ -30,3 +30,4 @@ sessions/
 
 .claude/
 logs/
+settings.json
