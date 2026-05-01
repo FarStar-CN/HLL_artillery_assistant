@@ -345,6 +345,9 @@
       showDiag(false);
       setIceState("-");
       setLastError("-");
+      for (const key in chunkBuffers) {
+        delete chunkBuffers[key];
+      }
     }
 
     function connectToSource() {
@@ -421,22 +424,50 @@
       });
     }
 
+    const chunkBuffers = {};
+    let msgLog = [];
+
     function handleMessage(message) {
       if (!message || typeof message !== "object") {
+        console.warn("[HLL-DIAG] handleMessage: non-object", typeof message);
         return;
+      }
+
+      const t = message.type || "?";
+      // Log summary, full payload logged for first few of each type
+      const key = t;
+      if (!msgLog[key]) msgLog[key] = 0;
+      msgLog[key]++;
+      if (msgLog[key] <= 3) {
+        if (t === "asset_chunk") {
+          console.log(`[HLL-DIAG] recv #${msgLog[key]}: type=${t} name=${message.name} idx=${message.index}/${message.total} data_len=${(message.data||"").length}`);
+        } else if (t === "state") {
+          console.log(`[HLL-DIAG] recv #${msgLog[key]}: type=${t} seq=${message.seq} hasPayload=${!!message.payload}`);
+        } else {
+          console.log(`[HLL-DIAG] recv #${msgLog[key]}: type=${t}`, message);
+        }
       }
 
       if (message.type === "hello") {
         setStatus("Connected", "ok");
+        console.log("[HLL-DIAG] hello received, connection established");
         return;
       }
 
       if (message.type === "asset") {
+        console.log(`[HLL-DIAG] legacy asset: name=${message.name} data_len=${(message.data||"").length}`);
         loadAsset(message.name, message.mimeType, message.data);
         return;
       }
 
+      if (message.type === "asset_chunk") {
+        handleAssetChunk(message);
+        return;
+      }
+
       if (message.type === "clear_asset") {
+        console.log(`[HLL-DIAG] clear_asset: name=${message.name}`);
+        delete chunkBuffers[message.name];
         stateCache.assets[message.name] = null;
         draw();
         return;
@@ -450,11 +481,56 @@
       }
     }
 
+    function handleAssetChunk(message) {
+      let entry = chunkBuffers[message.name];
+      if (!entry) {
+        console.log(`[HLL-DIAG] chunk start: name=${message.name} total=${message.total} mime=${message.mimeType}`);
+        entry = {
+          chunks: [],
+          total: message.total,
+          mimeType: message.mimeType,
+          received: 0,
+        };
+        chunkBuffers[message.name] = entry;
+      }
+
+      if (entry.total !== message.total) {
+        console.warn(`[HLL-DIAG] chunk total mismatch for ${message.name}: was ${entry.total} now ${message.total}, resetting`);
+        entry.chunks = [];
+        entry.total = message.total;
+        entry.received = 0;
+      }
+
+      if (entry.chunks[message.index] !== undefined) {
+        console.warn(`[HLL-DIAG] chunk dup: name=${message.name} idx=${message.index}`);
+        return;
+      }
+
+      entry.chunks[message.index] = message.data;
+      entry.received++;
+
+      if (entry.received % 10 === 0 || entry.received === entry.total) {
+        console.log(`[HLL-DIAG] chunk progress: name=${message.name} ${entry.received}/${entry.total}`);
+      }
+
+      if (entry.received === entry.total) {
+        const fullData = entry.chunks.join("");
+        console.log(`[HLL-DIAG] chunk complete: name=${message.name} total_len=${fullData.length} chunks=${entry.total}`);
+        delete chunkBuffers[message.name];
+        loadAsset(message.name, entry.mimeType, fullData);
+      }
+    }
+
     function loadAsset(name, mimeType, base64Data) {
+      console.log(`[HLL-DIAG] loadAsset: name=${name} mime=${mimeType} b64_len=${(base64Data||"").length}`);
       const image = new Image();
       image.onload = () => {
+        console.log(`[HLL-DIAG] image loaded OK: name=${name} w=${image.naturalWidth} h=${image.naturalHeight}`);
         stateCache.assets[name] = image;
         draw();
+      };
+      image.onerror = (e) => {
+        console.error(`[HLL-DIAG] image load FAILED: name=${name} src_preview=${image.src.substring(0,80)}`);
       };
       image.src = `data:${mimeType};base64,${base64Data}`;
     }

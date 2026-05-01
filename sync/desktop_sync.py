@@ -1,11 +1,28 @@
 import asyncio
 import base64
 import json
+import logging
 import queue
+import sys
 import threading
 import time
 import uuid
 from pathlib import Path
+
+logger = logging.getLogger("HLL.Sync")
+logger.setLevel(logging.DEBUG)
+if not logger.handlers:
+    _h = logging.StreamHandler(sys.stdout)
+    _h.setLevel(logging.DEBUG)
+    _h.setFormatter(logging.Formatter("[%(asctime)s] %(name)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
+    logger.addHandler(_h)
+    # Also write to a temp file in case stdout is not visible (Qt on Windows)
+    _log_path = Path(__file__).resolve().parent.parent / "sync_debug.log"
+    _fh = logging.FileHandler(str(_log_path), encoding="utf-8")
+    _fh.setLevel(logging.DEBUG)
+    _fh.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", datefmt="%H:%M:%S"))
+    logger.addHandler(_fh)
+    logger.info(f"Logging to {_log_path}")
 
 from aiortc import RTCConfiguration, RTCIceServer
 
@@ -105,25 +122,45 @@ class DesktopSyncManager:
 
     def publish_asset(self, name, image_bytes, width_px, height_px, mime_type="image/png"):
         if not self.is_running():
+            logger.warning(f"SYNC-DIAG publish_asset({name!r}) skipped: not running")
             return
 
-        payload = {
-            "type": "asset",
-            "seq": self._next_seq(),
-            "timestampMs": int(time.time() * 1000),
-            "name": name,
-            "mimeType": mime_type,
-            "widthPx": width_px,
-            "heightPx": height_px,
-            "encoding": "base64",
-            "data": base64.b64encode(image_bytes).decode("ascii"),
-        }
-        self._asset_queue.put(payload)
+        base64_data = base64.b64encode(image_bytes).decode("ascii")
+        logger.info(f"SYNC-DIAG publish_asset({name!r}) raw={len(image_bytes)}B base64={len(base64_data)}chars dims={width_px}x{height_px}")
+        self._publish_asset_data(name, base64_data, width_px, height_px, mime_type)
+
+    def _publish_asset_data(self, name, base64_data, width_px, height_px, mime_type):
+        # peerjs_py Json serialization has a hard 16300-byte limit (CHUNKED_MTU).
+        # Base64 map images can easily exceed that, so we split into chunks
+        # and reassemble on the JS side.
+        chunk_size = 15000
+        total = max(1, (len(base64_data) + chunk_size - 1) // chunk_size)
+
+        logger.info(f"SYNC-DIAG _publish_asset_data({name!r}) total_chunks={total} chunk_size={chunk_size}")
+        for i in range(total):
+            chunk = base64_data[i * chunk_size:(i + 1) * chunk_size]
+            payload = {
+                "type": "asset_chunk",
+                "seq": self._next_seq(),
+                "timestampMs": int(time.time() * 1000),
+                "name": name,
+                "index": i,
+                "total": total,
+                "mimeType": mime_type,
+                "widthPx": width_px,
+                "heightPx": height_px,
+                "encoding": "base64",
+                "data": chunk,
+            }
+            self._asset_queue.put(payload)
+        logger.info(f"SYNC-DIAG _publish_asset_data({name!r}) queued {total} chunks, queue_depth={self._asset_queue.qsize()}")
 
     def clear_asset(self, name):
         if not self.is_running():
+            logger.warning(f"SYNC-DIAG clear_asset({name!r}) skipped: not running")
             return
 
+        logger.info(f"SYNC-DIAG clear_asset({name!r})")
         payload = {
             "type": "clear_asset",
             "seq": self._next_seq(),
@@ -231,9 +268,17 @@ class DesktopSyncManager:
             pass
 
     async def _flush_asset_messages(self):
+        if self._connection is None:
+            if not self._asset_queue.empty():
+                logger.debug(f"SYNC-DIAG _flush_assets: no connection, {self._asset_queue.qsize()} items pending")
+            return
+        count = 0
         while not self._asset_queue.empty():
             payload = self._asset_queue.get_nowait()
             await self._send_payload(payload)
+            count += 1
+        if count:
+            logger.info(f"SYNC-DIAG _flush_assets: sent {count} items")
 
     async def _flush_latest_state(self):
         with self._state_lock:
@@ -245,11 +290,23 @@ class DesktopSyncManager:
     async def _send_payload(self, payload):
         connection = self._connection
         if connection is None:
+            logger.warning(f"SYNC-DIAG _send_payload: connection is None, dropping msg type={payload.get('type')}")
             return
+
+        msg_type = payload.get("type", "?")
+        chunk_info = ""
+        if msg_type == "asset_chunk":
+            chunk_info = f" name={payload.get('name')} idx={payload.get('index')}/{payload.get('total')} data_len={len(payload.get('data',''))}"
+        elif msg_type == "state":
+            chunk_info = f" seq={payload.get('seq')}"
+        elif msg_type == "clear_asset":
+            chunk_info = f" name={payload.get('name')}"
 
         try:
             await connection.send(payload)
+            logger.debug(f"SYNC-DIAG _send OK: type={msg_type}{chunk_info}")
         except Exception as exc:
+            logger.error(f"SYNC-DIAG _send FAIL: type={msg_type}{chunk_info} err={exc}")
             self._set_status("error", f"Send failed: {exc}")
 
     def _bind_peer_events(self):
@@ -280,7 +337,10 @@ class DesktopSyncManager:
         peer.on(self._peer_event_type.Disconnected.value, on_disconnected)
 
     async def _handle_incoming_connection(self, connection):
+        logger.info(f"SYNC-DIAG _handle_incoming_connection called, existing_conn={self._connection is not None}, conn_type={type(connection).__name__}, serialization={getattr(connection, 'serialization', '?')}")
+
         if self._connection is not None:
+            logger.warning(f"SYNC-DIAG _handle_incoming_connection: already connected, rejecting new connection")
             try:
                 await connection.close()
             except Exception:
@@ -290,6 +350,7 @@ class DesktopSyncManager:
         self._connection = connection
         self._connected_peer_label = getattr(connection, "peer", "mobile-client")
         self._set_status("connected", "")
+        logger.info(f"SYNC-DIAG connection set, queue_depth={self._asset_queue.qsize()}")
 
         def on_close():
             self._connection = None

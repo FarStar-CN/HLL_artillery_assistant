@@ -112,7 +112,7 @@ class MainWindow(QMainWindow):
 
         btn_clear = QPushButton("Clear Overlay")
         btn_clear.setStyleSheet("QPushButton { padding: 8px; font-size: 14px; }")
-        btn_clear.clicked.connect(self.view.clear_overlay)
+        btn_clear.clicked.connect(self._clear_overlay_and_sync)
         side_layout.addWidget(btn_clear)
 
         sync_title = QLabel("Mobile Sync")
@@ -229,6 +229,7 @@ class MainWindow(QMainWindow):
         )
         if path:
             self.view.load_img(path)
+            self._publish_sync_assets()
 
     def _capture_and_overlay(self):
         try:
@@ -249,6 +250,7 @@ class MainWindow(QMainWindow):
 
         self.last_screenshot_path = save_path
         self.view.set_overlay(cropped, opacity=CFG["OPACITY"])
+        self._publish_sync_assets()
 
     def _start_mobile_sync(self):
         started = self.sync_manager.start()
@@ -263,6 +265,10 @@ class MainWindow(QMainWindow):
     def _stop_mobile_sync(self):
         self.sync_manager.stop()
         self._refresh_sync_ui()
+
+    def _clear_overlay_and_sync(self):
+        self.view.clear_overlay()
+        self._publish_sync_assets()
 
     def _publish_sync_assets(self):
         if not self.sync_manager.is_running():

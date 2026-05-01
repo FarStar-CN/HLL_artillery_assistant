@@ -27,3 +27,5 @@ screenshot_*.png
 
 # Generated sync sessions
 sessions/
+
+.claude/
