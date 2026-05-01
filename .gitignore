@@ -29,3 +29,4 @@ screenshot_*.png
 sessions/
 
 .claude/
+logs/

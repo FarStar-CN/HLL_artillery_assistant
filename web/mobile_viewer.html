@@ -8,13 +8,14 @@
     :root {
       color-scheme: dark;
       --bg: #08111f;
-      --panel: rgba(6, 16, 30, 0.84);
-      --line: rgba(115, 197, 255, 0.24);
+      --panel: rgba(6, 16, 30, 0.88);
+      --line: rgba(115, 197, 255, 0.18);
       --text: #eef5ff;
       --muted: #8ea6bf;
       --accent: #71d8ff;
       --ok: #66f0a9;
       --warn: #ffcd70;
+      --sidebar-w: 270px;
     }
 
     * {
@@ -26,192 +27,203 @@
       margin: 0;
       width: 100%;
       height: 100%;
-      background:
-        radial-gradient(circle at top, rgba(38, 79, 145, 0.32), transparent 38%),
-        linear-gradient(180deg, #09111f 0%, #050912 100%);
+      background: linear-gradient(180deg, #09111f 0%, #050912 100%);
       color: var(--text);
       font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
       overflow: hidden;
     }
 
-    #app {
-      position: relative;
-      width: 100%;
-      height: 100%;
+    /* ── Login Screen ── */
+    #loginScreen {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(circle at top, rgba(38, 79, 145, 0.32), transparent 38%),
+        linear-gradient(180deg, #09111f 0%, #050912 100%);
+      z-index: 10;
     }
 
-    canvas {
-      width: 100%;
-      height: 100%;
-      display: block;
-      touch-action: none;
-    }
-
-    .hud {
-      position: absolute;
-      left: 12px;
-      right: 12px;
-      top: 12px;
-      display: grid;
-      gap: 10px;
-      pointer-events: none;
-    }
-
-    .panel {
+    .login-card {
+      width: min(340px, 90vw);
+      padding: 32px 24px 24px;
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 14px;
+      border-radius: 18px;
       backdrop-filter: blur(14px);
-      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
-    }
-
-    .session {
-      padding: 12px 14px;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
       display: grid;
-      gap: 8px;
-      pointer-events: auto;
+      gap: 14px;
+      text-align: center;
     }
 
-    .session-row {
-      display: grid;
-      gap: 6px;
+    .login-card h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
     }
 
-    .label {
-      font-size: 11px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
+    .login-card h2 {
+      margin: -6px 0 4px;
+      font-size: 12px;
+      font-weight: 400;
       color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
     }
 
-    .value {
-      font-size: 13px;
-      word-break: break-all;
-    }
-
-    .controls {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 8px;
-    }
-
-    input {
+    .login-card input {
       width: 100%;
-      padding: 10px 12px;
+      padding: 12px 14px;
       border-radius: 10px;
       border: 1px solid rgba(144, 186, 255, 0.2);
       background: rgba(6, 14, 28, 0.9);
       color: var(--text);
       font: inherit;
+      font-size: 13px;
+      text-align: center;
     }
 
-    button {
+    .login-card button {
+      width: 100%;
       border: 0;
       border-radius: 10px;
-      padding: 10px 14px;
+      padding: 12px;
       background: linear-gradient(135deg, #0eb7f0, #5df2c5);
       color: #04111f;
       font: inherit;
       font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
     }
 
-    .metrics {
-      margin-top: auto;
-      padding: 12px 14px;
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px 14px;
+    .login-card button:active {
+      opacity: 0.85;
+    }
+
+    .login-status {
+      font-size: 12px;
+      min-height: 18px;
+    }
+
+    /* ── Main Screen ── */
+    #mainScreen {
+      display: none;
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+
+    #mainScreen.visible {
+      display: flex;
+    }
+
+    /* ── Sidebar ── */
+    #sidebar {
+      width: var(--sidebar-w);
+      min-width: var(--sidebar-w);
+      height: 100%;
+      overflow-y: auto;
+      background: var(--panel);
+      border-right: 1px solid var(--line);
+      backdrop-filter: blur(14px);
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      z-index: 5;
+      padding: 10px 0;
+    }
+
+    .sidebar-section {
+      padding: 10px 16px;
+    }
+
+    .sidebar-section + .sidebar-section {
+      border-top: 1px solid var(--line);
+    }
+
+    .section-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      margin-bottom: 8px;
     }
 
     .metric {
-      display: grid;
-      gap: 4px;
-    }
-
-    .metric .value {
-      font-size: 14px;
-    }
-
-    .status-ok {
-      color: var(--ok);
-    }
-
-    .status-warn {
-      color: var(--warn);
-    }
-
-    .diag {
-      position: absolute;
-      left: 12px;
-      right: 12px;
-      top: 50%;
-      transform: translateY(-50%);
-      display: grid;
-      gap: 6px;
-      pointer-events: none;
-    }
-
-    .diag .panel {
-      padding: 10px 14px;
-      display: grid;
-      gap: 4px;
-      font-size: 11px;
-    }
-
-    .diag .row {
       display: flex;
       justify-content: space-between;
-      gap: 12px;
+      align-items: baseline;
+      padding: 3px 0;
+      font-size: 13px;
     }
 
-    .diag .key {
+    .metric .key {
       color: var(--muted);
+      font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 0.06em;
     }
 
-    .diag .val {
+    .metric .val {
       color: var(--text);
       font-weight: 600;
+    }
+
+    .val.ok { color: var(--ok); }
+    .val.warn { color: var(--warn); }
+    .val.err { color: #ff7070; }
+
+    /* ── Canvas ── */
+    #scene {
+      flex: 1;
+      display: block;
+      touch-action: none;
+      min-width: 0;
     }
   </style>
 </head>
 <body>
-  <div id="app">
+
+  <!-- ── Login Screen ── -->
+  <div id="loginScreen">
+    <div class="login-card">
+      <h1>HLL Artillery</h1>
+      <h2>Mobile Viewer</h2>
+      <input id="peerInput" value="__DEFAULT_PEER_ID__" spellcheck="false" autocomplete="off" placeholder="Peer ID">
+      <button id="connectBtn" type="button">Connect</button>
+      <div class="login-status" id="loginStatus"></div>
+    </div>
+  </div>
+
+  <!-- ── Main Screen ── -->
+  <div id="mainScreen">
+    <div id="sidebar">
+      <div class="sidebar-section">
+        <div class="section-title">Telemetry</div>
+        <div class="metric"><span class="key">Mode</span><span class="val" id="modeValue">-</span></div>
+        <div class="metric"><span class="key">Distance</span><span class="val" id="distanceValue">-</span></div>
+        <div class="metric"><span class="key">Azimuth</span><span class="val" id="azimuthValue">-</span></div>
+        <div class="metric"><span class="key">MIL</span><span class="val" id="milValue">-</span></div>
+        <div class="metric"><span class="key">Relative</span><span class="val" id="relativeValue">-</span></div>
+        <div class="metric"><span class="key">State Seq</span><span class="val" id="seqValue">-</span></div>
+      </div>
+      <div class="sidebar-section">
+        <div class="section-title">Connection</div>
+        <div class="metric"><span class="key">Status</span><span class="val" id="statusText">-</span></div>
+        <div class="metric"><span class="key">Peer</span><span class="val" id="peerText">__DEFAULT_PEER_ID__</span></div>
+      </div>
+      <div class="sidebar-section">
+        <div class="section-title">Diagnostics</div>
+        <div class="metric"><span class="key">ICE</span><span class="val" id="iceState">-</span></div>
+        <div class="metric"><span class="key">Elapsed</span><span class="val" id="connTimer">0s</span></div>
+        <div class="metric"><span class="key">Error</span><span class="val" id="lastError">-</span></div>
+      </div>
+    </div>
     <canvas id="scene"></canvas>
-    <div class="hud">
-      <div class="panel session">
-        <div class="session-row">
-          <div class="label">Connection</div>
-          <div class="value" id="statusText">Idle</div>
-        </div>
-        <div class="session-row">
-          <div class="label">Peer ID</div>
-          <div class="value" id="peerText">__DEFAULT_PEER_ID__</div>
-        </div>
-        <div class="controls">
-          <input id="peerInput" value="__DEFAULT_PEER_ID__" spellcheck="false" autocomplete="off">
-          <button id="connectBtn" type="button">Connect</button>
-        </div>
-      </div>
-    </div>
-    <div class="diag" id="diagPanel" style="display:none;">
-      <div class="panel">
-        <div class="row"><span class="key">ICE State</span><span class="val" id="iceState">-</span></div>
-        <div class="row"><span class="key">Elapsed</span><span class="val" id="connTimer">0s</span></div>
-        <div class="row"><span class="key">Last Error</span><span class="val" id="lastError">-</span></div>
-      </div>
-    </div>
-    <div class="hud" style="top:auto; bottom:12px;">
-      <div class="panel metrics">
-        <div class="metric"><div class="label">Mode</div><div class="value" id="modeValue">-</div></div>
-        <div class="metric"><div class="label">Distance</div><div class="value" id="distanceValue">-</div></div>
-        <div class="metric"><div class="label">Azimuth</div><div class="value" id="azimuthValue">-</div></div>
-        <div class="metric"><div class="label">MIL</div><div class="value" id="milValue">-</div></div>
-        <div class="metric"><div class="label">Relative</div><div class="value" id="relativeValue">-</div></div>
-        <div class="metric"><div class="label">State Seq</div><div class="value" id="seqValue">-</div></div>
-      </div>
-    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
@@ -225,6 +237,10 @@
 
     const canvas = document.getElementById("scene");
     const ctx = canvas.getContext("2d");
+    const loginScreen = document.getElementById("loginScreen");
+    const mainScreen = document.getElementById("mainScreen");
+    const sidebar = document.getElementById("sidebar");
+    const loginStatus = document.getElementById("loginStatus");
     const statusText = document.getElementById("statusText");
     const peerText = document.getElementById("peerText");
     const peerInput = document.getElementById("peerInput");
@@ -268,17 +284,13 @@
     const iceStateEl = document.getElementById("iceState");
     const connTimerEl = document.getElementById("connTimer");
     const lastErrorEl = document.getElementById("lastError");
-    const diagPanel = document.getElementById("diagPanel");
-
-    function showDiag(visible) {
-      diagPanel.style.display = visible ? "grid" : "none";
-    }
 
     function setIceState(state) {
       iceStateEl.textContent = state || "-";
-      const color = state === "connected" || state === "completed" ? "var(--ok)" :
-                    state === "failed" || state === "disconnected" ? "#ff7070" : "var(--warn)";
-      iceStateEl.style.color = color;
+      iceStateEl.className = "val " + (
+        state === "connected" || state === "completed" ? "ok" :
+        state === "failed" || state === "disconnected" ? "err" : "warn"
+      );
     }
 
     function setLastError(msg) {
@@ -317,19 +329,32 @@
       });
     }
 
-    function resizeCanvas() {
+    function getCanvasSize() {
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.floor(window.innerWidth * dpr);
-      canvas.height = Math.floor(window.innerHeight * dpr);
-      canvas.style.width = `${window.innerWidth}px`;
-      canvas.style.height = `${window.innerHeight}px`;
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      return { w: Math.floor(w * dpr), h: Math.floor(h * dpr), cssW: w, cssH: h, dpr: dpr };
+    }
+
+    function resizeCanvas() {
+      const { w, h, cssW, cssH, dpr } = getCanvasSize();
+      if (w <= 0 || h <= 0) return;
+      canvas.width = w;
+      canvas.height = h;
+      canvas.style.width = `${cssW}px`;
+      canvas.style.height = `${cssH}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       draw();
     }
 
-    function setStatus(text, mode = "warn") {
-      statusText.textContent = text;
-      statusText.className = `value status-${mode}`;
+    function setStatus(text, mode) {
+      statusText.textContent = text || "-";
+      statusText.className = "val " + (mode === "ok" ? "ok" : mode === "err" ? "err" : "warn");
+      // Also show brief status on login screen if visible
+      if (loginScreen.style.display !== "none") {
+        loginStatus.textContent = text || "";
+        loginStatus.style.color = mode === "ok" ? "var(--ok)" : mode === "err" ? "#ff7070" : "var(--warn)";
+      }
     }
 
     function resetPeer() {
@@ -342,12 +367,23 @@
         peer.destroy();
         peer = null;
       }
-      showDiag(false);
       setIceState("-");
       setLastError("-");
       for (const key in chunkBuffers) {
         delete chunkBuffers[key];
       }
+    }
+
+    function showMainScreen() {
+      loginScreen.style.display = "none";
+      mainScreen.classList.add("visible");
+      resizeCanvas();
+    }
+
+    function showLoginScreen() {
+      mainScreen.classList.remove("visible");
+      loginScreen.style.display = "flex";
+      setStatus("Connection closed", "warn");
     }
 
     function connectToSource() {
@@ -360,7 +396,6 @@
       resetPeer();
       peerText.textContent = targetPeer;
       setStatus("Connecting to signaling server...", "warn");
-      showDiag(true);
       setIceState("connecting");
       setLastError("-");
       startConnTimer();
@@ -379,7 +414,7 @@
 
       peer.on("error", (error) => {
         const msg = String(error);
-        setStatus(`Peer error: ${msg}`, "warn");
+        setStatus(`Peer error: ${msg}`, "err");
         setLastError(msg);
         setIceState("failed");
         stopConnTimer();
@@ -403,6 +438,7 @@
         setStatus("Connected", "ok");
         setIceState("connected");
         stopConnTimer();
+        showMainScreen();
       });
 
       connection.on("data", (message) => {
@@ -413,11 +449,12 @@
         setStatus("Connection closed", "warn");
         setIceState("closed");
         stopConnTimer();
+        showLoginScreen();
       });
 
       connection.on("error", (error) => {
         const msg = String(error);
-        setStatus(`Connection error: ${msg}`, "warn");
+        setStatus(`Connection error: ${msg}`, "err");
         setLastError(msg);
         setIceState("failed");
         stopConnTimer();
@@ -434,7 +471,6 @@
       }
 
       const t = message.type || "?";
-      // Log summary, full payload logged for first few of each type
       const key = t;
       if (!msgLog[key]) msgLog[key] = 0;
       msgLog[key]++;
@@ -550,10 +586,13 @@
     }
 
     function draw() {
-      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      const { cssW, cssH } = getCanvasSize();
+      if (cssW <= 0 || cssH <= 0) return;
+
+      ctx.clearRect(0, 0, cssW, cssH);
       const payload = stateCache.payload;
       if (!payload) {
-        drawEmptyMessage();
+        drawEmptyMessage(cssW);
         return;
       }
 
@@ -596,7 +635,7 @@
       ctx.restore();
     }
 
-    function drawEmptyMessage() {
+    function drawEmptyMessage(canvasW) {
       ctx.save();
       ctx.fillStyle = "rgba(255,255,255,0.72)";
       ctx.font = "15px SF Mono, monospace";
