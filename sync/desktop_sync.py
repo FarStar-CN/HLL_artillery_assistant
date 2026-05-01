@@ -16,8 +16,10 @@ if not logger.handlers:
     _h.setLevel(logging.DEBUG)
     _h.setFormatter(logging.Formatter("[%(asctime)s] %(name)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
     logger.addHandler(_h)
-    # Also write to a temp file in case stdout is not visible (Qt on Windows)
-    _log_path = Path(__file__).resolve().parent.parent / "sync_debug.log"
+    # Also write to a log file in case stdout is not visible (Qt on Windows)
+    _log_dir = Path(__file__).resolve().parent / "logs"
+    _log_dir.mkdir(parents=True, exist_ok=True)
+    _log_path = _log_dir / "sync_debug.log"
     _fh = logging.FileHandler(str(_log_path), encoding="utf-8")
     _fh.setLevel(logging.DEBUG)
     _fh.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", datefmt="%H:%M:%S"))
@@ -120,23 +122,44 @@ class DesktopSyncManager:
         with self._state_lock:
             self._latest_state = payload
 
-    def publish_asset(self, name, image_bytes, width_px, height_px, mime_type="image/png"):
+    def publish_asset(self, name, image_bytes, width_px, height_px, mime_type="image/jpeg"):
+        """Enqueue an asset for publishing. Runs on the main thread.
+        Raw bytes are queued; base64 encoding and chunking happen
+        later on the sync thread to avoid blocking the UI."""
         if not self.is_running():
             logger.warning(f"SYNC-DIAG publish_asset({name!r}) skipped: not running")
             return
 
-        base64_data = base64.b64encode(image_bytes).decode("ascii")
-        logger.info(f"SYNC-DIAG publish_asset({name!r}) raw={len(image_bytes)}B base64={len(base64_data)}chars dims={width_px}x{height_px}")
-        self._publish_asset_data(name, base64_data, width_px, height_px, mime_type)
+        logger.info(f"SYNC-DIAG publish_asset({name!r}) raw={len(image_bytes)}B dims={width_px}x{height_px} mime={mime_type}")
+        job = {
+            "type": "asset_job",
+            "name": name,
+            "image_bytes": image_bytes,
+            "width_px": width_px,
+            "height_px": height_px,
+            "mime_type": mime_type,
+        }
+        self._asset_queue.put(job)
 
-    def _publish_asset_data(self, name, base64_data, width_px, height_px, mime_type):
-        # peerjs_py Json serialization has a hard 16300-byte limit (CHUNKED_MTU).
-        # Base64 map images can easily exceed that, so we split into chunks
-        # and reassemble on the JS side.
+    async def _process_asset_job(self, job):
+        """Run on the sync thread: base64-encode, split into chunks, send all.
+        This moves CPU-heavy base64 encoding off the Qt main thread."""
+        name = job["name"]
+        image_bytes = job["image_bytes"]
+        mime_type = job["mime_type"]
+        width_px = job["width_px"]
+        height_px = job["height_px"]
+
+        base64_data = base64.b64encode(image_bytes).decode("ascii")
         chunk_size = 15000
         total = max(1, (len(base64_data) + chunk_size - 1) // chunk_size)
 
-        logger.info(f"SYNC-DIAG _publish_asset_data({name!r}) total_chunks={total} chunk_size={chunk_size}")
+        logger.info(
+            f"SYNC-DIAG _process_asset_job({name!r}) "
+            f"raw={len(image_bytes)}B base64={len(base64_data)}chars "
+            f"chunks={total} dims={width_px}x{height_px} mime={mime_type}"
+        )
+
         for i in range(total):
             chunk = base64_data[i * chunk_size:(i + 1) * chunk_size]
             payload = {
@@ -152,8 +175,8 @@ class DesktopSyncManager:
                 "encoding": "base64",
                 "data": chunk,
             }
-            self._asset_queue.put(payload)
-        logger.info(f"SYNC-DIAG _publish_asset_data({name!r}) queued {total} chunks, queue_depth={self._asset_queue.qsize()}")
+            await self._send_payload(payload)
+        logger.info(f"SYNC-DIAG _process_asset_job({name!r}) sent {total} chunks")
 
     def clear_asset(self, name):
         if not self.is_running():
@@ -269,16 +292,22 @@ class DesktopSyncManager:
 
     async def _flush_asset_messages(self):
         if self._connection is None:
-            if not self._asset_queue.empty():
-                logger.debug(f"SYNC-DIAG _flush_assets: no connection, {self._asset_queue.qsize()} items pending")
+            # Drain asset_jobs to avoid unbounded memory from raw image bytes
+            while not self._asset_queue.empty():
+                item = self._asset_queue.get_nowait()
+                if item.get("type") == "asset_job":
+                    logger.debug(f"SYNC-DIAG _flush_assets: no connection, dropping asset_job {item.get('name')}")
             return
         count = 0
         while not self._asset_queue.empty():
-            payload = self._asset_queue.get_nowait()
-            await self._send_payload(payload)
+            item = self._asset_queue.get_nowait()
+            if item.get("type") == "asset_job":
+                await self._process_asset_job(item)
+            else:
+                await self._send_payload(item)
             count += 1
         if count:
-            logger.info(f"SYNC-DIAG _flush_assets: sent {count} items")
+            logger.info(f"SYNC-DIAG _flush_assets: processed {count} items")
 
     async def _flush_latest_state(self):
         with self._state_lock:

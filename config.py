@@ -36,6 +36,7 @@ CFG = {
         },
     ],
     "SYNC_DEBUG_LEVEL": 3,
+    "SYNC_IMAGE_JPEG_QUALITY": 80,
     "LEFT": 724,
     "RIGHT": 1835,
     "TOP": 159,

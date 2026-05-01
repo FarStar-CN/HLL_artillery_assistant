@@ -399,19 +399,21 @@ class MapView(QGraphicsView):
         return assets
 
     def _pixmap_payload(self, pixmap):
-        image_bytes = self._pixmap_to_png_bytes(pixmap)
+        image_bytes = self._pixmap_to_image_bytes(pixmap)
         return {
             "image_bytes": image_bytes,
             "width_px": pixmap.width(),
             "height_px": pixmap.height(),
-            "mime_type": "image/png",
+            "mime_type": "image/jpeg",
         }
 
-    def _pixmap_to_png_bytes(self, pixmap):
+    def _pixmap_to_image_bytes(self, pixmap, fmt="JPEG", quality=None):
+        if quality is None:
+            quality = CFG.get("SYNC_IMAGE_JPEG_QUALITY", 80)
         byte_array = QByteArray()
         buffer = QBuffer(byte_array)
         buffer.open(QBuffer.WriteOnly)
-        pixmap.save(buffer, "PNG")
+        pixmap.save(buffer, fmt, quality=quality)
         return bytes(byte_array)
 
     def _normalize_scene_point(self, point, map_width, map_height):
