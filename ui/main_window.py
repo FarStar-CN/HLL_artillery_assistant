@@ -4,7 +4,9 @@ from PySide6.QtCore import QElapsedTimer, QTimer, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFormLayout,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -47,124 +49,138 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.view, 3)
 
-        side_panel = QFrame()
-        side_panel.setFixedWidth(240)
-        side_panel.setStyleSheet(
-            """
+        # ── side panel (dark theme) ──
+        side = QFrame()
+        side.setFixedWidth(250)
+        side.setStyleSheet("""
             QFrame {
-                background-color: #f5f5f5;
-                border-left: 1px solid #ccc;
+                background-color: #0f1923;
+                border-left: 1px solid #1e3044;
             }
-            """
-        )
-        side_layout = QVBoxLayout(side_panel)
-
-        self.labels = {key: QLabel() for key in "x y mil ang mode".split()}
-        for label in self.labels.values():
-            label.setStyleSheet(
-                """
-                QLabel {
-                    font-size: 14px;
-                    padding: 6px;
-                    color: #333;
-                }
-                """
-            )
-            side_layout.addWidget(label)
-
-        title = QLabel("Map Controls")
-        title.setStyleSheet(
-            """
-            QLabel {
-                font-size: 16px;
+            QGroupBox {
+                color: #7eb8da;
+                font-size: 12px;
                 font-weight: bold;
-                padding: 8px 6px;
-                color: #222;
+                border: 1px solid #1e3044;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding: 14px 10px 10px;
             }
-            """
-        )
-        side_layout.addWidget(title)
-
-        btn_set_a = QPushButton("Set A Point")
-        btn_set_a.setStyleSheet("QPushButton { padding: 8px; font-size: 14px; }")
-        btn_set_a.clicked.connect(self._enable_point_selection)
-        side_layout.addWidget(btn_set_a)
-
-        btn_top = QPushButton("Always On Top", checkable=True)
-        btn_top.setStyleSheet(
-            """
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 6px;
+            }
+            QLabel {
+                color: #c0d8f0;
+                font-size: 13px;
+            }
             QPushButton {
-                padding: 8px;
-                font-size: 14px;
+                background: #1a2a3a;
+                color: #c0d8f0;
+                border: 1px solid #2a4a6a;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background: #243850;
+                border-color: #4a8abe;
+            }
+            QPushButton:pressed {
+                background: #0f1a28;
             }
             QPushButton:checked {
-                background-color: #d0f0ff;
-                border: 1px solid #66ccff;
+                background: #1a3a5a;
+                border-color: #5aacff;
             }
-            """
-        )
-        btn_top.toggled.connect(self._toggle_topmost)
-        side_layout.addWidget(btn_top)
+        """)
+        side_layout = QVBoxLayout(side)
+        side_layout.setSpacing(8)
+
+        # ── Telemetry ──
+        grp_telem = QGroupBox("Telemetry")
+        telem_form = QFormLayout(grp_telem)
+        telem_form.setSpacing(4)
+
+        self._metric = {}
+        for key, label in [("mode", "Mode"), ("x", "Distance"), ("y", "Azimuth"),
+                           ("mil", "MIL"), ("ang", "Relative")]:
+            val_lbl = QLabel("-")
+            val_lbl.setStyleSheet("font-size: 15px; font-weight: 700; color: #e8f4ff;")
+            self._metric[key] = val_lbl
+            key_lbl = QLabel(label)
+            key_lbl.setStyleSheet("font-size: 11px; color: #6a8aaa;")
+            telem_form.addRow(key_lbl, val_lbl)
+        side_layout.addWidget(grp_telem)
+
+        # ── Map Controls ──
+        grp_ctrl = QGroupBox("Map Controls")
+        ctrl_layout = QVBoxLayout(grp_ctrl)
+
+        btn_set_a = QPushButton("Set A Point")
+        btn_set_a.clicked.connect(self._enable_point_selection)
+        ctrl_layout.addWidget(btn_set_a)
+
+        self.btn_top = QPushButton("Always On Top")
+        self.btn_top.setCheckable(True)
+        self.btn_top.toggled.connect(self._toggle_topmost)
+        ctrl_layout.addWidget(self.btn_top)
 
         btn_capture = QPushButton("Capture Overlay")
-        btn_capture.setStyleSheet("QPushButton { padding: 8px; font-size: 14px; }")
         btn_capture.clicked.connect(self._capture_and_overlay)
-        side_layout.addWidget(btn_capture)
+        ctrl_layout.addWidget(btn_capture)
 
         btn_clear = QPushButton("Clear Overlay")
-        btn_clear.setStyleSheet("QPushButton { padding: 8px; font-size: 14px; }")
         btn_clear.clicked.connect(self._clear_overlay_and_sync)
-        side_layout.addWidget(btn_clear)
+        ctrl_layout.addWidget(btn_clear)
 
-        sync_title = QLabel("Mobile Sync")
-        sync_title.setStyleSheet(
-            """
-            QLabel {
-                font-size: 16px;
-                font-weight: bold;
-                padding: 12px 6px 8px;
-                color: #222;
-            }
-            """
-        )
-        side_layout.addWidget(sync_title)
+        side_layout.addWidget(grp_ctrl)
 
-        self.sync_status = QLabel("Sync: idle")
-        self.sync_status.setWordWrap(True)
-        self.sync_status.setStyleSheet("QLabel { font-size: 13px; padding: 4px 6px; color: #333; }")
-        side_layout.addWidget(self.sync_status)
+        # ── Mobile Sync ──
+        grp_sync = QGroupBox("Mobile Sync")
+        sync_layout = QVBoxLayout(grp_sync)
 
-        self.sync_peer = QLabel("Peer ID: -")
-        self.sync_peer.setWordWrap(True)
-        self.sync_peer.setStyleSheet("QLabel { font-size: 12px; padding: 4px 6px; color: #333; }")
-        side_layout.addWidget(self.sync_peer)
+        self._sync_indicator = QLabel("● Idle")
+        self._sync_indicator.setStyleSheet("font-size: 13px; font-weight: 600; color: #6a8aaa;")
+        sync_layout.addWidget(self._sync_indicator)
 
-        self.sync_viewer = QLabel("Viewer file: -")
-        self.sync_viewer.setWordWrap(True)
-        self.sync_viewer.setStyleSheet("QLabel { font-size: 12px; padding: 4px 6px; color: #333; }")
-        side_layout.addWidget(self.sync_viewer)
+        self._sync_peer_lbl = QLabel("Peer: -")
+        self._sync_peer_lbl.setStyleSheet("font-size: 11px; color: #6a8aaa;")
+        self._sync_peer_lbl.setWordWrap(True)
+        sync_layout.addWidget(self._sync_peer_lbl)
 
-        btn_start_sync = QPushButton("Start Mobile Sync")
-        btn_start_sync.setStyleSheet("QPushButton { padding: 8px; font-size: 14px; }")
-        btn_start_sync.clicked.connect(self._start_mobile_sync)
-        side_layout.addWidget(btn_start_sync)
+        self._sync_viewer_lbl = QLabel("Viewer: -")
+        self._sync_viewer_lbl.setStyleSheet("font-size: 11px; color: #6a8aaa;")
+        self._sync_viewer_lbl.setWordWrap(True)
+        sync_layout.addWidget(self._sync_viewer_lbl)
 
-        btn_stop_sync = QPushButton("Stop Mobile Sync")
-        btn_stop_sync.setStyleSheet("QPushButton { padding: 8px; font-size: 14px; }")
-        btn_stop_sync.clicked.connect(self._stop_mobile_sync)
-        side_layout.addWidget(btn_stop_sync)
+        btn_row = QHBoxLayout()
+        btn_start = QPushButton("Start")
+        btn_start.clicked.connect(self._start_mobile_sync)
+        btn_start.setStyleSheet("QPushButton { color: #66f0a9; } QPushButton:hover { border-color: #66f0a9; }")
+        btn_row.addWidget(btn_start)
+
+        btn_stop = QPushButton("Stop")
+        btn_stop.clicked.connect(self._stop_mobile_sync)
+        btn_stop.setStyleSheet("QPushButton { color: #ff7070; } QPushButton:hover { border-color: #ff7070; }")
+        btn_row.addWidget(btn_stop)
+
+        sync_layout.addLayout(btn_row)
+        side_layout.addWidget(grp_sync)
 
         side_layout.addStretch(1)
-        layout.addWidget(side_panel)
+        layout.addWidget(side)
         self.setCentralWidget(container)
-        self.update_sidebar(CFG["MAX_X"], 0.0, compute_mil(CFG["MAX_X"]), 0.0)
+        self._update_metric_display(CFG["MAX_X"], 0.0, compute_mil(CFG["MAX_X"]), 0.0)
 
     def _build_menu(self):
         menu = self.menuBar().addMenu("File")
         menu.addAction(QAction("Open...", self, shortcut="Ctrl+O", triggered=self._open_map))
-        menu.addAction(QAction("Settings...", self, shortcut="Ctrl+,", triggered=self._open_settings))
         menu.addSeparator()
         menu.addAction(QAction("Exit", self, shortcut="Ctrl+Q", triggered=self.close))
+
+        self.menuBar().addAction(QAction("Settings...", self, shortcut="Ctrl+,", triggered=self._open_settings))
 
     def _start_timer(self):
         self.timer = QTimer(self)
@@ -309,23 +325,40 @@ class MainWindow(QMainWindow):
         viewer_file = self.sync_manager.viewer_file
         viewer_text = str(viewer_file) if viewer_file else "-"
 
-        status_line = f"Sync: {status}"
-        if self.sync_manager.connection_label:
-            status_line += f" ({self.sync_manager.connection_label})"
-        if self.sync_manager.last_error:
-            status_line += f" | {self.sync_manager.last_error}"
+        color_map = {
+            "connected": ("#66f0a9", "●"),
+            "waiting_client": ("#ffcd70", "●"),
+            "starting": ("#ffcd70", "○"),
+            "error": ("#ff7070", "●"),
+            "missing_dependency": ("#ff7070", "●"),
+            "stopping": ("#6a8aaa", "○"),
+        }
+        dot_color, dot = color_map.get(status, ("#6a8aaa", "○"))
 
-        self.sync_status.setText(status_line)
-        self.sync_peer.setText(f"Peer ID: {peer_id}")
-        self.sync_viewer.setText(f"Viewer file: {viewer_text}")
+        label = self.sync_manager.connection_label
+        extra = f" ({label})" if label else ""
+        err = self.sync_manager.last_error
+        extra += f" — {err}" if err else ""
+
+        self._sync_indicator.setText(f"{dot} {status.replace('_',' ').title()}{extra}")
+        self._sync_indicator.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {dot_color};")
+
+        self._sync_peer_lbl.setText(f"Peer: {peer_id}")
+        self._sync_viewer_lbl.setText(f"Viewer: {viewer_text}")
+
+    def _update_metric_display(self, x_value, y_value, mil_value, angle_value):
+        mode_name = "Gunner" if self.mode == "F1" else "Loader"
+        self._metric["mode"].setText(mode_name)
+        self._metric["mode"].setStyleSheet(
+            f"font-size: 15px; font-weight: 700; color: {'#71d8ff' if self.mode == 'F1' else '#ffcd70'};"
+        )
+        self._metric["x"].setText(f"{x_value:.1f} m")
+        self._metric["y"].setText(f"{y_value:.1f}°")
+        self._metric["mil"].setText(f"{mil_value:.2f}")
+        self._metric["ang"].setText(f"{angle_value:.1f}°")
 
     def update_sidebar(self, x_value, y_value, mil_value, angle_value):
-        mode_name = "Gunner" if self.mode == "F1" else "Loader"
-        self.labels["mode"].setText(f"Mode: {mode_name}")
-        self.labels["x"].setText(f"Distance: {x_value:.1f} m")
-        self.labels["y"].setText(f"Azimuth: {y_value:.1f} deg")
-        self.labels["mil"].setText(f"MIL: {mil_value:.2f}")
-        self.labels["ang"].setText(f"Relative Angle: {angle_value:.1f} deg")
+        self._update_metric_display(x_value, y_value, mil_value, angle_value)
 
     def set_status_message(self, message):
         self.statusBar().showMessage(message)
