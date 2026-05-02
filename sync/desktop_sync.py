@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import logging
+import logging.handlers
 import queue
 import sys
 import threading
@@ -19,7 +20,9 @@ if not logger.handlers:
     _log_dir = Path(__file__).resolve().parent / "logs"
     _log_dir.mkdir(parents=True, exist_ok=True)
     _log_path = _log_dir / "sync_debug.log"
-    _fh = logging.FileHandler(str(_log_path), encoding="utf-8")
+    _fh = logging.handlers.RotatingFileHandler(
+        str(_log_path), encoding="utf-8", maxBytes=500_000, backupCount=2,
+    )
     _fh.setLevel(logging.DEBUG)
     _fh.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", datefmt="%H:%M:%S"))
     logger.addHandler(_fh)

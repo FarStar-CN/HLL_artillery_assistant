@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWidgets import QApplication
 
-from config import CFG, load_settings, apply_loaded_settings
+from core.config import CFG, load_settings, apply_loaded_settings
 from ui.main_window import MainWindow
 
 

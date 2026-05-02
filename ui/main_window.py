@@ -16,9 +16,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from capture import capture_overlay, remove_file
-from config import CFG, VK, key_pressed
-from country import COUNTRIES, DEFAULT_COUNTRY, get_profile
+from core.capture import capture_overlay, remove_file
+from core.config import CFG, VK, key_pressed
+from core.country import COUNTRIES, DEFAULT_COUNTRY, get_profile
 from sync.desktop_sync import DesktopSyncManager
 from ui.map_view import MapView
 from ui.settings_dialog import SettingsDialog
@@ -40,7 +40,7 @@ class MainWindow(QMainWindow):
         self.sync_manager = DesktopSyncManager(self.project_dir, CFG)
         self.sync_manager.set_status_callback(self._handle_sync_status)
 
-        self.setWindowTitle("HLL_artillery_helper")
+        self.setWindowTitle("HLL Artillery Assistant")
         self.resize(1050, 680)
 
         self._build_ui()

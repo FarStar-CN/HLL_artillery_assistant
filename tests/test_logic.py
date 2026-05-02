@@ -1,7 +1,7 @@
 import unittest
 
-from country import USA_STD
-from logic import (
+from core.country import USA_STD
+from core.logic import (
     angle_from_points,
     clamp_distance,
     clamp_to_sector,

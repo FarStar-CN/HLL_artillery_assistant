@@ -17,9 +17,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
-from config import CFG, VK, key_pressed
-from country import get_default_profile
-from logic import (
+from core.config import CFG, VK, key_pressed
+from core.country import get_default_profile
+from core.logic import (
     angle_from_points,
     clamp_distance,
     clamp_to_sector,
@@ -575,7 +575,7 @@ class MapView(QGraphicsView):
         if self.preview_arrow_item is None:
             self.preview_arrow_item = self.scene().addPath(
                 path,
-                QPen(CFG["LINE_COLOR"], 2),
+                QPen(CFG["LINE_COLOR"], CFG["LINE_WIDTH"]),
             )
             self.preview_arrow_item.setZValue(1.7)
             return
