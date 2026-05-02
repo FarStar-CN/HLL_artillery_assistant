@@ -1,8 +1,13 @@
-import math
-
-import PySide6.QtGui
 from PySide6.QtCore import QBuffer, QByteArray, QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QImageReader,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsLineItem,
@@ -13,12 +18,11 @@ from PySide6.QtWidgets import (
 )
 
 from config import CFG, VK, key_pressed
+from country import get_default_profile
 from logic import (
     angle_from_points,
     clamp_distance,
     clamp_to_sector,
-    compute_effective_distance,
-    compute_mil,
     compute_target_position,
     pixels_per_meter,
     point_distance,
@@ -43,30 +47,27 @@ class MapView(QGraphicsView):
         self.b_item = None
         self.line_item = None
         self.sector_item = None
+        self.heading_line_item = None
 
         self.preview_line_item = None
         self.preview_sector_item = None
         self.preview_arrow_item = None
 
+        self.active_profile = get_default_profile()
+
         self.pos_a = None
         self.heading_deg = None
-        self.sector_ready = False
-        self.distance_m = CFG["MAX_X"]
+        self.distance_m = self.active_profile.max_distance
         self.azimuth_deg = 0.0
         self.tilt_angle = 0.0
 
         self._calc_mode = "STD"
-        self._saved = {
-            "STD": {"pos_a": None, "pos_b": None, "distance_m": CFG["MAX_X"], "azimuth_deg": 0.0, "heading_deg": None},
-            "SPG": {"pos_a": None, "pos_b": None, "distance_m": CFG["MAX_X"], "azimuth_deg": 0.0, "heading_deg": None, "tilt_angle": 0.0},
-        }
 
         self.set_a_mode = False
         self.drawing_ray = False
         self.panning = False
         self.pan_start = QPoint()
 
-        self.drag_release_pos = None
         self.preview_mouse_pos = None
         self.preview_angle_deg = None
         self.shift_locked = False
@@ -74,7 +75,7 @@ class MapView(QGraphicsView):
         self.saved_state = None
 
     def load_img(self, path):
-        PySide6.QtGui.QImageReader.setAllocationLimit(0)
+        QImageReader.setAllocationLimit(0)
         pixmap = QPixmap(path)
         if pixmap.isNull():
             return QMessageBox.warning(self, "Error", f"Unable to load: {path}")
@@ -95,26 +96,21 @@ class MapView(QGraphicsView):
         self.b_item = None
         self.line_item = None
         self.sector_item = None
+        self.heading_line_item = None
         self.preview_line_item = None
         self.preview_sector_item = None
         self.preview_arrow_item = None
 
         self.pos_a = None
         self.heading_deg = None
-        self.sector_ready = False
-        self.distance_m = CFG["MAX_X"]
+        self.distance_m = self.active_profile.max_distance
         self.azimuth_deg = 0.0
         self.tilt_angle = 0.0
 
         self._calc_mode = "STD"
-        self._saved = {
-            "STD": {"pos_a": None, "pos_b": None, "distance_m": CFG["MAX_X"], "azimuth_deg": 0.0, "heading_deg": None},
-            "SPG": {"pos_a": None, "pos_b": None, "distance_m": CFG["MAX_X"], "azimuth_deg": 0.0, "heading_deg": None, "tilt_angle": 0.0},
-        }
 
         self.set_a_mode = False
         self.drawing_ray = False
-        self.drag_release_pos = None
         self.preview_mouse_pos = None
         self.preview_angle_deg = None
         self.shift_locked = False
@@ -129,37 +125,15 @@ class MapView(QGraphicsView):
     def calc_mode(self):
         return self._calc_mode
 
+    def set_active_profile(self, profile):
+        self.active_profile = profile
+        self._clear_targeting()
+
     def switch_calc_mode(self, new_mode):
         if new_mode == self._calc_mode:
             return
-        old_mode = self._calc_mode
-        self._saved[old_mode] = {
-            "pos_a": self.pos_a,
-            "pos_b": self.b_item.pos() if self.b_item else None,
-            "distance_m": self.distance_m,
-            "azimuth_deg": self.azimuth_deg,
-            "heading_deg": self.heading_deg,
-        }
-        if old_mode == "SPG":
-            self._saved["SPG"]["tilt_angle"] = getattr(self, "tilt_angle", 0.0)
-
         self._calc_mode = new_mode
-        prev = self._saved[new_mode]
-        self.pos_a = prev["pos_a"]
-        self.heading_deg = prev["heading_deg"]
-        self.distance_m = prev["distance_m"]
-        self.azimuth_deg = prev["azimuth_deg"]
-        if new_mode == "SPG":
-            self.tilt_angle = prev.get("tilt_angle", 0.0)
-
-        self._clear_committed_target_items()
-        self._clear_preview_items()
-        self._remove_item("a_item")
-        if self.pos_a is not None:
-            self._render_a_item(self.pos_a)
-        self._update_sector(create=True)
-        self._update_target()
-        self._notify_sidebar()
+        self._clear_targeting()
 
     def begin_set_a_mode(self):
         if self.drawing_ray:
@@ -239,7 +213,6 @@ class MapView(QGraphicsView):
         self.drawing_ray = True
         self.preview_mouse_pos = pos
         self.preview_angle_deg = None
-        self.drag_release_pos = None
         self.shift_locked = False
         self.snapped_angle_deg = None
 
@@ -251,7 +224,6 @@ class MapView(QGraphicsView):
         self.main_window.set_status_message("Drag to aim. Hold Shift to snap. Press Esc to cancel.")
 
     def _finish_ray_setup(self, release_pos):
-        self.drag_release_pos = QPointF(release_pos)
         self.preview_mouse_pos = QPointF(release_pos)
 
         if point_distance(
@@ -290,7 +262,6 @@ class MapView(QGraphicsView):
         self.drawing_ray = False
         self.preview_mouse_pos = None
         self.preview_angle_deg = None
-        self.drag_release_pos = None
         self.shift_locked = False
         self.snapped_angle_deg = None
         self.saved_state = None
@@ -376,7 +347,7 @@ class MapView(QGraphicsView):
         self.main_window.update_sidebar(
             self.distance_m,
             angle,
-            compute_mil(d_eff),
+            self.active_profile.compute_mil(d_eff),
             0.0,
             getattr(self, "tilt_angle", 0.0),
         )
@@ -385,9 +356,8 @@ class MapView(QGraphicsView):
         self.main_window.set_status_message(f"Preview angle: {angle:.1f} deg{status_suffix}")
 
     def _effective_distance(self):
-        """SPG 模式下返回修正后的有效距离，STD 返回原始距离"""
         if self._calc_mode == "SPG":
-            return compute_effective_distance(self.distance_m, self.tilt_angle)
+            return self.active_profile.compute_effective_distance(self.distance_m, self.tilt_angle)
         return self.distance_m
 
     def _pixels_per_meter(self):
@@ -408,7 +378,7 @@ class MapView(QGraphicsView):
         self.main_window.update_sidebar(
             self.distance_m,
             self.azimuth_deg,
-            compute_mil(d_eff),
+            self.active_profile.compute_mil(d_eff),
             relative_angle(self.azimuth_deg, self.heading_deg),
             getattr(self, "tilt_angle", 0.0),
         )
@@ -429,6 +399,7 @@ class MapView(QGraphicsView):
         result = {
             "mode": f"{calc_mode} · {'Gunner' if role == 'F1' else 'Loader'}" if calc_mode == "STD" else calc_mode,
             "calcMode": calc_mode,
+            "country": self.active_profile.country,
             "map": {
                 "widthPx": map_width,
                 "heightPx": map_height,
@@ -437,10 +408,10 @@ class MapView(QGraphicsView):
                 "distanceM": self.distance_m,
                 "azimuthDeg": self.azimuth_deg,
                 "headingDeg": self.heading_deg,
-                "mil": compute_mil(d_eff),
+                "mil": self.active_profile.compute_mil(d_eff),
                 "relativeAngleDeg": relative_angle(self.azimuth_deg, self.heading_deg),
-                "sectorAngleDeg": CFG["SECTOR_ANG"],
-                "sectorRadiusNorm": CFG["SECTOR_R_M"] / CFG["MAP_WIDTH_M"],
+                "sectorAngleDeg": self.active_profile.sector_angle,
+                "sectorRadiusNorm": self.active_profile.sector_radius / CFG["MAP_WIDTH_M"],
                 "overlayOpacity": CFG["OPACITY"],
                 "tiltAngleDeg": getattr(self, "tilt_angle", 0.0),
             },
@@ -502,23 +473,43 @@ class MapView(QGraphicsView):
                 QBrush(CFG["SECTOR_COLOR"]),
             )
             self.sector_item.setZValue(1)
-            self.sector_ready = True
             return
 
         self.sector_item.setPath(path)
 
+        self._update_heading_line()
+
+    def _update_heading_line(self):
+        radius_px = self.active_profile.sector_radius * self._pixels_per_meter()
+        end_x, end_y = compute_target_position(
+            self.pos_a.x(), self.pos_a.y(), radius_px, self.heading_deg, 1.0,
+        )
+
+        if self.heading_line_item is None:
+            pen = QPen(CFG["DASH_LINE_COLOR"], CFG["DASH_LINE_WIDTH"], Qt.DashLine)
+            self.heading_line_item = QGraphicsLineItem(
+                self.pos_a.x(), self.pos_a.y(), end_x, end_y,
+            )
+            self.heading_line_item.setPen(pen)
+            self.heading_line_item.setZValue(1.2)
+            self.scene().addItem(self.heading_line_item)
+            return
+
+        self.heading_line_item.setLine(
+            self.pos_a.x(), self.pos_a.y(), end_x, end_y,
+        )
+
     def _sector_path(self, origin, center_angle_deg):
-        radius_px = CFG["SECTOR_R_M"] * self._pixels_per_meter()
-        start_angle = center_angle_deg - CFG["SECTOR_ANG"]
-        end_angle = center_angle_deg + CFG["SECTOR_ANG"]
+        radius_px = self.active_profile.sector_radius * self._pixels_per_meter()
+        start_angle = center_angle_deg - self.active_profile.sector_angle
+        end_angle = center_angle_deg + self.active_profile.sector_angle
 
         path = QPainterPath(origin)
         steps = 60
         for index in range(steps + 1):
-            radians_value = math.radians(start_angle + (end_angle - start_angle) * index / steps)
-            dx = math.sin(radians_value) * radius_px
-            dy = -math.cos(radians_value) * radius_px
-            path.lineTo(origin + QPointF(dx, dy))
+            angle = start_angle + (end_angle - start_angle) * index / steps
+            x, y = compute_target_position(origin.x(), origin.y(), radius_px, angle, 1.0)
+            path.lineTo(QPointF(x, y))
 
         path.closeSubpath()
         return path
@@ -530,7 +521,7 @@ class MapView(QGraphicsView):
         self.azimuth_deg = clamp_to_sector(
             self.azimuth_deg,
             self.heading_deg,
-            CFG["SECTOR_ANG"],
+            self.active_profile.sector_angle,
         )
         pos_b_x, pos_b_y = compute_target_position(
             self.pos_a.x(),
@@ -552,7 +543,7 @@ class MapView(QGraphicsView):
 
         if self.line_item is None:
             self.line_item = QGraphicsLineItem()
-            self.line_item.setPen(QPen(CFG["LINE_COLOR"], 2))
+            self.line_item.setPen(QPen(CFG["LINE_COLOR"], CFG["LINE_WIDTH"]))
             self.line_item.setZValue(1.5)
             self.scene().addItem(self.line_item)
 
@@ -561,7 +552,7 @@ class MapView(QGraphicsView):
     def _update_preview_line(self, preview_end):
         if self.preview_line_item is None:
             self.preview_line_item = QGraphicsLineItem()
-            self.preview_line_item.setPen(QPen(CFG["LINE_COLOR"], 2))
+            self.preview_line_item.setPen(QPen(CFG["LINE_COLOR"], CFG["LINE_WIDTH"]))
             self.preview_line_item.setZValue(1.6)
             self.scene().addItem(self.preview_line_item)
 
@@ -592,10 +583,8 @@ class MapView(QGraphicsView):
         self.preview_arrow_item.setPath(path)
 
     def _point_from_angle(self, origin, distance_px, angle_deg):
-        radians_value = math.radians(angle_deg)
-        dx = math.sin(radians_value) * distance_px
-        dy = -math.cos(radians_value) * distance_px
-        return origin + QPointF(dx, dy)
+        x, y = compute_target_position(origin.x(), origin.y(), distance_px, angle_deg, 1.0)
+        return QPointF(x, y)
 
     def _update_preview_sector(self, angle_deg):
         preview_color = QColor(CFG["SECTOR_COLOR"])
@@ -614,11 +603,22 @@ class MapView(QGraphicsView):
         self.preview_sector_item.setBrush(QBrush(preview_color))
         self.preview_sector_item.setPath(path)
 
+    def _clear_targeting(self):
+        self._clear_committed_target_items()
+        self._clear_preview_items()
+        self._remove_item("a_item")
+        self.pos_a = None
+        self.heading_deg = None
+        self.distance_m = self.active_profile.max_distance
+        self.azimuth_deg = 0.0
+        self.tilt_angle = 0.0
+        self._notify_sidebar()
+
     def _clear_committed_target_items(self):
         self._remove_item("sector_item")
         self._remove_item("b_item")
         self._remove_item("line_item")
-        self.sector_ready = False
+        self._remove_item("heading_line_item")
 
     def _clear_preview_items(self):
         self._remove_item("preview_line_item")
@@ -643,8 +643,8 @@ class MapView(QGraphicsView):
         if mode == "F1":
             self.distance_m = clamp_distance(
                 self.distance_m + dx,
-                CFG["MIN_X"],
-                CFG["MAX_X"],
+                self.active_profile.min_distance,
+                self.active_profile.max_distance,
             )
             self.azimuth_deg = (self.azimuth_deg + dy) % 360
         else:
@@ -655,7 +655,20 @@ class MapView(QGraphicsView):
         self._update_target()
         self._notify_sidebar()
 
+    def adjust_tilt(self, delta):
+        if self._calc_mode != "SPG":
+            return
+        self.tilt_angle += delta
+        self._update_target()
+        self._notify_sidebar()
+
     def wheelEvent(self, event):
+        if self._calc_mode == "SPG" and key_pressed(VK["SHIFT"]):
+            delta = event.angleDelta().y()
+            if delta != 0:
+                tilt_step = self.active_profile.tilt_speed
+                self.adjust_tilt(tilt_step if delta > 0 else -tilt_step)
+            return
         scale_factor = 1.25 if event.angleDelta().y() > 0 else 0.8
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.scale(scale_factor, scale_factor)

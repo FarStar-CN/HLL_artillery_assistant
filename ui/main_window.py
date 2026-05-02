@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 
 from capture import capture_overlay, remove_file
 from config import CFG, VK, key_pressed
-from logic import compute_mil
+from country import COUNTRIES, DEFAULT_COUNTRY, get_profile
 from sync.desktop_sync import DesktopSyncManager
 from ui.map_view import MapView
 from ui.settings_dialog import SettingsDialog
@@ -32,8 +32,11 @@ class MainWindow(QMainWindow):
         self.time.start()
         self.mode = "F1"
         self.calc_mode = "STD"
+        self.country = DEFAULT_COUNTRY
+        self.active_profile = get_profile(self.country, self.calc_mode)
         self.last_screenshot_path = None
         self.view = MapView(self)
+        self.view.active_profile = self.active_profile
         self.sync_manager = DesktopSyncManager(self.project_dir, CFG)
         self.sync_manager.set_status_callback(self._handle_sync_status)
 
@@ -98,6 +101,18 @@ class MainWindow(QMainWindow):
         """)
         side_layout = QVBoxLayout(side)
         side_layout.setSpacing(8)
+
+        # ── Country selection ──
+        country_row = QHBoxLayout()
+        self._btn_country = {}
+        for c in COUNTRIES:
+            btn = QPushButton(c)
+            btn.setCheckable(True)
+            btn.setChecked(c == self.country)
+            btn.clicked.connect(lambda checked, country=c: self._switch_country(country))
+            country_row.addWidget(btn)
+            self._btn_country[c] = btn
+        side_layout.addLayout(country_row)
 
         # ── Mode toggle ──
         toggle_row = QHBoxLayout()
@@ -187,7 +202,7 @@ class MainWindow(QMainWindow):
         side_layout.addStretch(1)
         layout.addWidget(side)
         self.setCentralWidget(container)
-        self._update_metric_display(CFG["MAX_X"], 0.0, compute_mil(CFG["MAX_X"]), 0.0)
+        self._update_metric_display(self.active_profile.max_distance, 0.0, self.active_profile.compute_mil(self.active_profile.max_distance), 0.0)
 
     def _build_menu(self):
         menu = self.menuBar().addMenu("File")
@@ -222,26 +237,35 @@ class MainWindow(QMainWindow):
         elif key_pressed(VK["F2"]):
             self.mode = "F2"
 
+        if self.calc_mode == "SPG":
+            dy = 0.0
+            if key_pressed(VK["Q"]):
+                dy -= self.active_profile.move_speed_y * delta_time
+            if key_pressed(VK["E"]):
+                dy += self.active_profile.move_speed_y * delta_time
+            if dy != 0.0:
+                self.view.adjust_xy(0.0, dy, "F2")
+
         if self.mode == "F1":
             dx = 0.0
             dy = 0.0
             if key_pressed(VK["W"]):
-                dx -= CFG["MOVE_SPEED_X"] * delta_time
+                dx -= self.active_profile.move_speed_x * delta_time
             if key_pressed(VK["S"]):
-                dx += CFG["MOVE_SPEED_X"] * delta_time
+                dx += self.active_profile.move_speed_x * delta_time
             if key_pressed(VK["A"]):
-                dy -= CFG["MOVE_SPEED_Y"] * delta_time
+                dy -= self.active_profile.move_speed_y * delta_time
             if key_pressed(VK["D"]):
-                dy += CFG["MOVE_SPEED_Y"] * delta_time
+                dy += self.active_profile.move_speed_y * delta_time
             if dx != 0.0 or dy != 0.0:
                 self.view.adjust_xy(dx, dy, self.mode)
             return
 
         dy = 0.0
         if key_pressed(VK["A"]):
-            dy -= CFG["MOVE_SPEED_Y"] * delta_time
+            dy -= self.active_profile.move_speed_y * delta_time
         if key_pressed(VK["D"]):
-            dy += CFG["MOVE_SPEED_Y"] * delta_time
+            dy += self.active_profile.move_speed_y * delta_time
         if dy != 0.0:
             self.view.adjust_xy(0.0, dy, self.mode)
 
@@ -322,12 +346,28 @@ class MainWindow(QMainWindow):
         else:
             self.sync_manager.clear_asset("overlay")
 
+    def _update_active_profile(self):
+        profile = get_profile(self.country, self.calc_mode)
+        self.active_profile = profile
+        self.view.set_active_profile(profile)
+
+    def _switch_country(self, country):
+        if country == self.country:
+            return
+        self.country = country
+        for c, btn in self._btn_country.items():
+            btn.setChecked(c == country)
+        self._update_active_profile()
+        self._publish_sync_assets()
+        self._publish_sync_state()
+
     def _switch_calc_mode(self, new_mode):
         if new_mode == self.calc_mode:
             return
         self.calc_mode = new_mode
         self._btn_std.setChecked(new_mode == "STD")
         self._btn_spg.setChecked(new_mode == "SPG")
+        self._update_active_profile()
         self.view.switch_calc_mode(new_mode)
         self._publish_sync_assets()
         self._publish_sync_state()
@@ -373,10 +413,10 @@ class MainWindow(QMainWindow):
 
     def _update_metric_display(self, x_value, y_value, mil_value, angle_value, tilt_value=0.0):
         if self.calc_mode == "STD":
-            mode_name = f"STD · {'Gunner' if self.mode == 'F1' else 'Loader'}"
+            mode_name = f"{self.country} · STD · {'Gunner' if self.mode == 'F1' else 'Loader'}"
             mode_color = '#71d8ff' if self.mode == 'F1' else '#ffcd70'
         else:
-            mode_name = "SPG"
+            mode_name = f"{self.country} · SPG"
             mode_color = '#90ffb0'
         self._metric["mode"].setText(mode_name)
         self._metric["mode"].setStyleSheet(f"font-size: 15px; font-weight: 700; color: {mode_color};")

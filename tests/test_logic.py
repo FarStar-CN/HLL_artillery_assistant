@@ -1,13 +1,11 @@
-import math
 import unittest
 
+from country import USA_STD
 from logic import (
     angle_from_points,
     clamp_distance,
     clamp_to_sector,
-    compute_mil,
     compute_target_position,
-    nearest_cardinal_heading,
     point_distance,
     project_point_to_ray,
     relative_angle,
@@ -42,11 +40,7 @@ class LogicTests(unittest.TestCase):
 
     def test_compute_mil(self):
         expected = 1002.0 - 1500.0 / (1500.0 / 356.0)
-        self.assertAlmostEqual(compute_mil(1500.0), expected)
-
-    def test_nearest_cardinal_heading(self):
-        heading = nearest_cardinal_heading(100, 0, 1000, 1000)
-        self.assertTrue(math.isclose(heading, 180.0))
+        self.assertAlmostEqual(USA_STD.compute_mil(1500.0), expected)
 
     def test_snap_to_cardinal(self):
         self.assertEqual(snap_to_cardinal(20), 0)

@@ -19,12 +19,6 @@ def snap_to_cardinal(angle_deg):
     )
 
 
-def nearest_cardinal_heading(point_x, point_y, map_width, map_height):
-    center_x = map_width / 2
-    center_y = map_height / 2
-    return snap_to_cardinal(angle_from_points(point_x, point_y, center_x, center_y))
-
-
 def clamp_distance(distance_m, min_distance_m, max_distance_m):
     return max(min_distance_m, min(max_distance_m, distance_m))
 
@@ -71,20 +65,3 @@ def relative_angle(angle_deg, heading_deg):
         return 0.0
     return (angle_deg - heading_deg + 540) % 360 - 180
 
-
-MIL_K = 1500.0 / 356.0  # 米→MIL 转换系数：每 MIL 对应约 4.2135 米
-
-
-def compute_mil(distance_m):
-    """STD 距离→MIL 公式"""
-    return 1002.0 - distance_m / MIL_K
-
-
-def inverse_mil(mil_value):
-    """MIL→距离 反函数"""
-    return MIL_K * (1002.0 - mil_value)
-
-
-def compute_effective_distance(distance_m, delta_mil):
-    """SPG 有效距离 = 原始距离 - k * Δmil"""
-    return distance_m - MIL_K * delta_mil

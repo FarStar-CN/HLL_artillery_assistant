@@ -12,17 +12,11 @@ CFG = {
     # ================================================================
 
     # Map & targeting model
-    "MAP_WIDTH_M": 2000.0,          # real-world map width (meters)
-    "MIN_X": 100.0,                 # min target distance clamp (m)
-    "MAX_X": 1600.0,                # max target distance clamp (m)
-    "SECTOR_ANG": 15,               # sector half-angle (degrees)
-    "SECTOR_R_M": 1600.0,           # sector radius (meters)
-    "PREVIEW_SECTOR_ALPHA": 45,     # preview sector fill alpha (0-255)
+    "MAP_WIDTH_M": 2000.0,
+    "PREVIEW_SECTOR_ALPHA": 45,
 
     # Keyboard / input
-    "MOVE_SPEED_X": 10.0,           # distance change rate (m/s) via W/S
-    "MOVE_SPEED_Y": 1.0,            # az/heading change rate (deg/s) via A/D
-    "POLL_MS": 10,                  # keyboard polling interval (ms)
+    "POLL_MS": 10,
 
     # ================================================================
     #  User-Configurable Settings
@@ -34,7 +28,10 @@ CFG = {
     "R_B": 30,
     "COLOR_A": QColor(0, 255, 0, 220),
     "COLOR_B": QColor(255, 0, 0, 180),
+    "LINE_WIDTH":2,
     "LINE_COLOR": QColor(0, 0, 255, 180),
+    "DASH_LINE_WIDTH":2,
+    "DASH_LINE_COLOR":QColor(255, 255, 255, 80),
     "SECTOR_COLOR": QColor(0, 120, 255, 80),
     "PREVIEW_ARROW_SIZE_PX": 50.0,
     "SET_A_MIN_DRAG_PX": 5.0,
@@ -76,6 +73,8 @@ VK = {
     "A": 0x41,
     "S": 0x53,
     "D": 0x44,
+    "Q": 0x51,
+    "E": 0x45,
     "F1": 0x70,
     "F2": 0x71,
     "SHIFT": 0x10,

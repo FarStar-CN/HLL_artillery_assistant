@@ -36,13 +36,16 @@ class FieldSpec:
 TAB_FIELDS = {
     "Appearance": [
         FieldSpec("R_A",                 "A-Point Radius (px)",       "int_spin",    25,     (1, 200)),
+        FieldSpec("COLOR_A", "A-Point Color", "color", None),
         FieldSpec("R_B",                 "B-Point Radius (px)",       "int_spin",    30,     (1, 200)),
-        FieldSpec("PREVIEW_ARROW_SIZE_PX","Preview Arrow Size (px)",  "double_spin", 50.0,   (5.0, 200.0), 1),
-        FieldSpec("SET_A_MIN_DRAG_PX",   "Min Drag to Set A (px)",   "double_spin", 5.0,    (0.0, 50.0), 1),
-        FieldSpec("COLOR_A",             "A-Point Color",             "color", None),
-        FieldSpec("COLOR_B",             "B-Point Color",             "color", None),
+        FieldSpec("COLOR_B", "B-Point Color", "color", None),
+        FieldSpec("LINE_WIDTH",          "Line width(px)",            "int_spin",    2,     (1, 20)),
         FieldSpec("LINE_COLOR",          "Line Color",                "color", None),
+        FieldSpec("DASH_LINE_WIDTH",     "Dash line width(px)",        "int_spin",    2,     (1, 20)),
+        FieldSpec("DASH_LINE_COLOR",     "Dash_Line Color",           "color", None),
         FieldSpec("SECTOR_COLOR",        "Sector Color",              "color", None),
+        FieldSpec("PREVIEW_ARROW_SIZE_PX", "Preview Arrow Size (px)", "double_spin", 50.0, (5.0, 200.0), 1),
+        FieldSpec("SET_A_MIN_DRAG_PX", "Min Drag to Set A (px)", "double_spin", 5.0, (0.0, 50.0), 1),
     ],
     "Capture & Overlay": [
         FieldSpec("LEFT",           "Crop Left (px)",           "int_spin",    724,  (0, 9999)),
