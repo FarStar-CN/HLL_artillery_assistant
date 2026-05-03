@@ -57,9 +57,9 @@ class MapView(QGraphicsView):
 
         self.pos_a = None
         self.heading_deg = None
-        self.distance_m = self.active_profile.max_distance
+        self._mil_flat = self.active_profile.compute_mil(self.active_profile.max_distance)
         self.azimuth_deg = 0.0
-        self.tilt_angle = 0.0
+        self.tilt_mil = 0.0
 
         self._calc_mode = "STD"
 
@@ -103,9 +103,9 @@ class MapView(QGraphicsView):
 
         self.pos_a = None
         self.heading_deg = None
-        self.distance_m = self.active_profile.max_distance
+        self._mil_flat = self.active_profile.compute_mil(self.active_profile.max_distance)
         self.azimuth_deg = 0.0
-        self.tilt_angle = 0.0
+        self.tilt_mil = 0.0
 
         self._calc_mode = "STD"
 
@@ -275,14 +275,14 @@ class MapView(QGraphicsView):
                 "pos_a": None,
                 "heading_deg": None,
                 "azimuth_deg": self.azimuth_deg,
-                "distance_m": self.distance_m,
+                "mil_flat": self._mil_flat,
             }
 
         return {
             "pos_a": QPointF(self.pos_a),
             "heading_deg": self.heading_deg,
             "azimuth_deg": self.azimuth_deg,
-            "distance_m": self.distance_m,
+            "mil_flat": self._mil_flat,
         }
 
     def _restore_saved_state(self):
@@ -290,7 +290,7 @@ class MapView(QGraphicsView):
         if state is None:
             return
 
-        self.distance_m = state["distance_m"]
+        self._mil_flat = state["mil_flat"]
         self.azimuth_deg = state["azimuth_deg"]
         self.heading_deg = state["heading_deg"]
 
@@ -344,12 +344,14 @@ class MapView(QGraphicsView):
         self._update_preview_arrow(preview_end, angle)
         self._update_preview_sector(angle)
         d_eff = self._effective_distance()
+        x_display = d_eff if self._calc_mode == "SPG" else self.active_profile.inverse_mil(self._mil_flat)
+        mil_display = self._mil_flat if self._calc_mode == "SPG" else self.active_profile.compute_mil(d_eff)
         self.main_window.update_sidebar(
-            self.distance_m,
+            x_display,
             angle,
-            self.active_profile.compute_mil(d_eff),
+            mil_display,
             0.0,
-            getattr(self, "tilt_angle", 0.0),
+            getattr(self, "tilt_mil", 0.0),
         )
 
         status_suffix = " (snapped)" if self.shift_locked else ""
@@ -357,8 +359,11 @@ class MapView(QGraphicsView):
 
     def _effective_distance(self):
         if self._calc_mode == "SPG":
-            return self.active_profile.compute_effective_distance(self.distance_m, self.tilt_angle)
-        return self.distance_m
+            return self.active_profile.inverse_mil(self._mil_flat + self.tilt_mil)
+        return self.active_profile.inverse_mil(self._mil_flat)
+
+    def _effective_max_distance(self):
+        return self.active_profile.max_distance
 
     def _pixels_per_meter(self):
         return pixels_per_meter(self.pix_item.pixmap().width(), CFG["MAP_WIDTH_M"])
@@ -375,12 +380,14 @@ class MapView(QGraphicsView):
 
     def _notify_sidebar(self):
         d_eff = self._effective_distance()
+        x_display = d_eff if self._calc_mode == "SPG" else self.active_profile.inverse_mil(self._mil_flat)
+        mil_display = self._mil_flat if self._calc_mode == "SPG" else self.active_profile.compute_mil(d_eff)
         self.main_window.update_sidebar(
-            self.distance_m,
+            x_display,
             self.azimuth_deg,
-            self.active_profile.compute_mil(d_eff),
+            mil_display,
             relative_angle(self.azimuth_deg, self.heading_deg),
-            getattr(self, "tilt_angle", 0.0),
+            getattr(self, "tilt_mil", 0.0),
         )
 
     def export_sync_state(self, role, calc_mode):
@@ -396,6 +403,12 @@ class MapView(QGraphicsView):
             b_point = self._normalize_scene_point(self.b_item.pos(), map_width, map_height)
 
         d_eff = self._effective_distance()
+        if calc_mode == "SPG":
+            sync_distance = d_eff
+            sync_mil = self._mil_flat
+        else:
+            sync_distance = self.active_profile.inverse_mil(self._mil_flat)
+            sync_mil = self.active_profile.compute_mil(d_eff)
         result = {
             "mode": f"{calc_mode} · {'Gunner' if role == 'F1' else 'Loader'}" if calc_mode == "STD" else calc_mode,
             "calcMode": calc_mode,
@@ -405,15 +418,15 @@ class MapView(QGraphicsView):
                 "heightPx": map_height,
             },
             "view": {
-                "distanceM": self.distance_m,
+                "distanceM": sync_distance,
                 "azimuthDeg": self.azimuth_deg,
                 "headingDeg": self.heading_deg,
-                "mil": self.active_profile.compute_mil(d_eff),
+                "mil": sync_mil,
                 "relativeAngleDeg": relative_angle(self.azimuth_deg, self.heading_deg),
                 "sectorAngleDeg": self.active_profile.sector_angle,
-                "sectorRadiusNorm": self.active_profile.sector_radius / CFG["MAP_WIDTH_M"],
+                "sectorRadiusNorm": self._effective_max_distance() / CFG["MAP_WIDTH_M"],
                 "overlayOpacity": CFG["OPACITY"],
-                "tiltAngleDeg": getattr(self, "tilt_angle", 0.0),
+                "tiltMil": getattr(self, "tilt_mil", 0.0),
             },
             "entities": {
                 "a": a_point,
@@ -480,7 +493,7 @@ class MapView(QGraphicsView):
         self._update_heading_line()
 
     def _update_heading_line(self):
-        radius_px = self.active_profile.sector_radius * self._pixels_per_meter()
+        radius_px = self._effective_max_distance() * self._pixels_per_meter()
         end_x, end_y = compute_target_position(
             self.pos_a.x(), self.pos_a.y(), radius_px, self.heading_deg, 1.0,
         )
@@ -500,7 +513,7 @@ class MapView(QGraphicsView):
         )
 
     def _sector_path(self, origin, center_angle_deg):
-        radius_px = self.active_profile.sector_radius * self._pixels_per_meter()
+        radius_px = self._effective_max_distance() * self._pixels_per_meter()
         start_angle = center_angle_deg - self.active_profile.sector_angle
         end_angle = center_angle_deg + self.active_profile.sector_angle
 
@@ -609,9 +622,9 @@ class MapView(QGraphicsView):
         self._remove_item("a_item")
         self.pos_a = None
         self.heading_deg = None
-        self.distance_m = self.active_profile.max_distance
+        self._mil_flat = self.active_profile.compute_mil(self.active_profile.max_distance)
         self.azimuth_deg = 0.0
-        self.tilt_angle = 0.0
+        self.tilt_mil = 0.0
         self._notify_sidebar()
 
     def _clear_committed_target_items(self):
@@ -641,11 +654,15 @@ class MapView(QGraphicsView):
             return
 
         if mode == "F1":
-            self.distance_m = clamp_distance(
-                self.distance_m + dx,
-                self.active_profile.min_distance,
-                self.active_profile.max_distance,
-            )
+            if self._calc_mode == "SPG":
+                self._mil_flat += dx
+                self._mil_flat = max(self.active_profile.spg_mil_min,
+                                     min(self.active_profile.spg_mil_max, self._mil_flat))
+            else:
+                d_target = self.active_profile.inverse_mil(self._mil_flat) + dx
+                d_target = clamp_distance(d_target, self.active_profile.min_distance,
+                                          self.active_profile.max_distance)
+                self._mil_flat = self.active_profile.compute_mil(d_target)
             self.azimuth_deg = (self.azimuth_deg + dy) % 360
         else:
             self.heading_deg = (self.heading_deg + dy) % 360
@@ -658,9 +675,96 @@ class MapView(QGraphicsView):
     def adjust_tilt(self, delta):
         if self._calc_mode != "SPG":
             return
-        self.tilt_angle += delta
+        self.tilt_mil += delta
+        self._update_sector()
         self._update_target()
         self._notify_sidebar()
+
+    def set_distance(self, value_m):
+        if self.pos_a is None or self.heading_deg is None:
+            return False
+        if self._calc_mode == "SPG":
+            p = self.active_profile
+            eff_low = min(p.compute_mil(p.min_distance), p.compute_mil(p.max_distance))
+            eff_high = max(p.compute_mil(p.min_distance), p.compute_mil(p.max_distance))
+            mil_min = max(p.spg_mil_min, eff_low - self.tilt_mil)
+            mil_max = min(p.spg_mil_max, eff_high - self.tilt_mil)
+            candidate_mil = p.compute_mil(value_m) - self.tilt_mil
+            clamped_mil = max(mil_min, min(mil_max, candidate_mil))
+            if abs(clamped_mil - candidate_mil) > 1e-6:
+                return False
+            self._mil_flat = clamped_mil
+        else:
+            clamped = clamp_distance(value_m, self.active_profile.min_distance,
+                                     self.active_profile.max_distance)
+            if abs(clamped - value_m) > 1e-6:
+                return False
+            self._mil_flat = self.active_profile.compute_mil(clamped)
+        self._update_target()
+        self._notify_sidebar()
+        return True
+
+    def set_azimuth(self, value_deg):
+        if self.pos_a is None or self.heading_deg is None:
+            return False
+        value_deg = value_deg % 360
+        clamped = clamp_to_sector(value_deg, self.heading_deg, self.active_profile.sector_angle)
+        if abs((clamped - value_deg + 540) % 360 - 180) > 1e-6:
+            return False
+        self.azimuth_deg = clamped
+        self._update_target()
+        self._notify_sidebar()
+        return True
+
+    def set_mil(self, mil_value):
+        if self.pos_a is None or self.heading_deg is None:
+            return False
+        if self._calc_mode == "SPG":
+            p = self.active_profile
+            eff_low = min(p.compute_mil(p.min_distance), p.compute_mil(p.max_distance))
+            eff_high = max(p.compute_mil(p.min_distance), p.compute_mil(p.max_distance))
+            mil_min = max(p.spg_mil_min, eff_low - self.tilt_mil)
+            mil_max = min(p.spg_mil_max, eff_high - self.tilt_mil)
+            clamped = max(mil_min, min(mil_max, mil_value))
+            if abs(clamped - mil_value) > 1e-6:
+                return False
+            self._mil_flat = clamped
+        else:
+            effective_dist = self.active_profile.inverse_mil(mil_value)
+            clamped = clamp_distance(
+                effective_dist,
+                self.active_profile.min_distance,
+                self.active_profile.max_distance,
+            )
+            if abs(clamped - effective_dist) > 1e-6:
+                return False
+            self._mil_flat = self.active_profile.compute_mil(clamped)
+        self._update_target()
+        self._notify_sidebar()
+        return True
+
+    def set_tilt(self, value_mil):
+        if self._calc_mode != "SPG":
+            return False
+        if self.pos_a is None or self.heading_deg is None:
+            return False
+        self.tilt_mil = value_mil
+        self._update_sector()
+        self._update_target()
+        self._notify_sidebar()
+        return True
+
+    def set_relative_angle(self, value_deg):
+        if self.pos_a is None or self.heading_deg is None:
+            return False
+        azimuth = (self.heading_deg + value_deg) % 360
+        clamped = clamp_to_sector(azimuth, self.heading_deg, self.active_profile.sector_angle)
+        if abs((clamped - azimuth + 540) % 360 - 180) > 1e-6:
+            return False
+        self.azimuth_deg = clamped
+        self._update_target()
+        self._notify_sidebar()
+        return True
 
     def wheelEvent(self, event):
         if self._calc_mode == "SPG" and key_pressed(VK["SHIFT"]):

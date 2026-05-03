@@ -22,12 +22,19 @@ class ArtilleryProfile:
     move_speed_y: float = 1.0
     tilt_speed: float = 5.0
 
+    # SPG mode: game's absolute MIL limits for mil_flat adjustment
+    spg_mil_min: float = -89.0
+    spg_mil_max: float = 466.0
+
     @property
     def label(self) -> str:
         return f"{self.country}_{self.mode}"
 
     def compute_mil(self, distance_m: float) -> float:
         return self.mil_base - distance_m / self.mil_k
+
+    def inverse_mil(self, mil_value: float) -> float:
+        return self.mil_k * (self.mil_base - mil_value)
 
     def compute_effective_distance(self, distance_m: float, delta_mil: float) -> float:
         return distance_m - self.mil_k * delta_mil
@@ -39,16 +46,16 @@ USA_STD = ArtilleryProfile(
     min_distance=100.0, max_distance=1600.0,
     sector_angle=15.0, sector_radius=1600.0,
     move_speed_x=10.0, move_speed_y=1.0,
-    tilt_speed=5.0,
+    tilt_speed=1.0,
 )
 
 USA_SPG = ArtilleryProfile(
     country="USA", mode="SPG",
-    mil_base=MIL_BASE_DEFAULT, mil_k=MIL_K_DEFAULT,
-    min_distance=100.0, max_distance=1000.0,
-    sector_angle=180.0, sector_radius=1000.0,
+    mil_base=-50.0 / 1.5, mil_k=-1.5,
+    min_distance=200.0, max_distance=600.0,
+    sector_angle=180.0, sector_radius=600.0,
     move_speed_x=10.0, move_speed_y=10.0,
-    tilt_speed=5.0,
+    tilt_speed=1.0,
 )
 
 UK_STD = ArtilleryProfile(
@@ -57,7 +64,7 @@ UK_STD = ArtilleryProfile(
     min_distance=100.0, max_distance=1600.0,
     sector_angle=15.0, sector_radius=1600.0,
     move_speed_x=10.0, move_speed_y=1.0,
-    tilt_speed=5.0,
+    tilt_speed=1.0,
 )
 
 UK_SPG = ArtilleryProfile(
@@ -66,7 +73,7 @@ UK_SPG = ArtilleryProfile(
     min_distance=100.0, max_distance=1600.0,
     sector_angle=15.0, sector_radius=1600.0,
     move_speed_x=10.0, move_speed_y=1.0,
-    tilt_speed=5.0,
+    tilt_speed=1.0,
 )
 
 USSR_STD = ArtilleryProfile(
@@ -75,7 +82,7 @@ USSR_STD = ArtilleryProfile(
     min_distance=100.0, max_distance=1600.0,
     sector_angle=15.0, sector_radius=1600.0,
     move_speed_x=10.0, move_speed_y=1.0,
-    tilt_speed=5.0,
+    tilt_speed=1.0,
 )
 
 USSR_SPG = ArtilleryProfile(
@@ -84,7 +91,7 @@ USSR_SPG = ArtilleryProfile(
     min_distance=100.0, max_distance=1600.0,
     sector_angle=15.0, sector_radius=1600.0,
     move_speed_x=10.0, move_speed_y=1.0,
-    tilt_speed=5.0,
+    tilt_speed=1.0,
 )
 
 DE_STD = ArtilleryProfile(
@@ -93,7 +100,7 @@ DE_STD = ArtilleryProfile(
     min_distance=100.0, max_distance=1600.0,
     sector_angle=15.0, sector_radius=1600.0,
     move_speed_x=10.0, move_speed_y=1.0,
-    tilt_speed=5.0,
+    tilt_speed=1.0,
 )
 
 DE_SPG = ArtilleryProfile(
@@ -102,7 +109,7 @@ DE_SPG = ArtilleryProfile(
     min_distance=100.0, max_distance=1600.0,
     sector_angle=15.0, sector_radius=1600.0,
     move_speed_x=10.0, move_speed_y=1.0,
-    tilt_speed=5.0,
+    tilt_speed=1.0,
 )
 
 PROFILES = {

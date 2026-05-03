@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QElapsedTimer, QTimer, Qt
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QDoubleValidator
 from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -133,15 +134,39 @@ class MainWindow(QMainWindow):
         telem_form = QFormLayout(grp_telem)
         telem_form.setSpacing(4)
 
+        EDIT_KEYS = {"x", "y", "mil", "ang", "tilt"}
         self._metric = {}
-        for key, label in [("mode", "Mode"), ("x", "Distance"), ("y", "Azimuth"),
-                           ("mil", "MIL"), ("ang", "Relative"), ("tilt", "Tilt")]:
-            val_lbl = QLabel("-")
-            val_lbl.setStyleSheet("font-size: 15px; font-weight: 700; color: #e8f4ff;")
-            self._metric[key] = val_lbl
-            key_lbl = QLabel(label)
+        self._edits = {}
+        for key, label_text in [("mode", "Mode"), ("x", "Distance"), ("y", "Azimuth"),
+                                ("mil", "MIL"), ("ang", "Relative"), ("tilt", "Tilt")]:
+            if key in EDIT_KEYS:
+                widget = QLineEdit("-")
+                widget.setAlignment(Qt.AlignRight)
+                widget.setValidator(QDoubleValidator())
+                widget.returnPressed.connect(self._make_edit_handler(key))
+                widget.setStyleSheet("""
+                    QLineEdit {
+                        font-size: 15px; font-weight: 700; color: #e8f4ff;
+                        background: transparent; border: 1px solid transparent;
+                        border-radius: 3px; padding: 2px 4px;
+                    }
+                    QLineEdit:hover {
+                        background: rgba(255,255,255,0.04);
+                        border: 1px solid #2a4a6a;
+                    }
+                    QLineEdit:focus {
+                        background: rgba(255,255,255,0.08);
+                        border: 1px solid #4a8abe;
+                    }
+                """)
+                self._edits[key] = widget
+            else:
+                widget = QLabel("-")
+                widget.setStyleSheet("font-size: 15px; font-weight: 700; color: #e8f4ff;")
+            self._metric[key] = widget
+            key_lbl = QLabel(label_text)
             key_lbl.setStyleSheet("font-size: 11px; color: #6a8aaa;")
-            telem_form.addRow(key_lbl, val_lbl)
+            telem_form.addRow(key_lbl, widget)
         side_layout.addWidget(grp_telem)
 
         # ── Map Controls ──
@@ -178,6 +203,8 @@ class MainWindow(QMainWindow):
         self._sync_peer_lbl = QLabel("Peer: -")
         self._sync_peer_lbl.setStyleSheet("font-size: 11px; color: #6a8aaa;")
         self._sync_peer_lbl.setWordWrap(True)
+        self._sync_peer_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._sync_peer_lbl.setCursor(Qt.IBeamCursor)
         sync_layout.addWidget(self._sync_peer_lbl)
 
         self._sync_viewer_lbl = QLabel("Viewer: -")
@@ -232,19 +259,33 @@ class MainWindow(QMainWindow):
         delta_time = self.time.elapsed() / 1000.0
         self.time.restart()
 
-        if key_pressed(VK["F1"]):
-            self.mode = "F1"
-        elif key_pressed(VK["F2"]):
-            self.mode = "F2"
+        if self.calc_mode != "SPG":
+            if key_pressed(VK["F1"]):
+                self.mode = "F1"
+            elif key_pressed(VK["F2"]):
+                self.mode = "F2"
 
         if self.calc_mode == "SPG":
-            dy = 0.0
+            dx = 0.0
+            dy_az = 0.0
+            dy_head = 0.0
+            if key_pressed(VK["W"]):
+                dx += self.active_profile.move_speed_x * delta_time
+            if key_pressed(VK["S"]):
+                dx -= self.active_profile.move_speed_x * delta_time
+            if key_pressed(VK["A"]):
+                dy_az -= self.active_profile.move_speed_y * delta_time
+            if key_pressed(VK["D"]):
+                dy_az += self.active_profile.move_speed_y * delta_time
             if key_pressed(VK["Q"]):
-                dy -= self.active_profile.move_speed_y * delta_time
+                dy_head -= self.active_profile.move_speed_y * delta_time
             if key_pressed(VK["E"]):
-                dy += self.active_profile.move_speed_y * delta_time
-            if dy != 0.0:
-                self.view.adjust_xy(0.0, dy, "F2")
+                dy_head += self.active_profile.move_speed_y * delta_time
+            if dy_head != 0.0:
+                self.view.adjust_xy(0.0, dy_head, "F2")
+            if dx != 0.0 or dy_az != 0.0:
+                self.view.adjust_xy(dx, dy_az, "F1")
+            return
 
         if self.mode == "F1":
             dx = 0.0
@@ -347,9 +388,8 @@ class MainWindow(QMainWindow):
             self.sync_manager.clear_asset("overlay")
 
     def _update_active_profile(self):
-        profile = get_profile(self.country, self.calc_mode)
-        self.active_profile = profile
-        self.view.set_active_profile(profile)
+        self.active_profile = get_profile(self.country, self.calc_mode)
+        self.view.active_profile = self.active_profile
 
     def _switch_country(self, country):
         if country == self.country:
@@ -358,6 +398,7 @@ class MainWindow(QMainWindow):
         for c, btn in self._btn_country.items():
             btn.setChecked(c == country)
         self._update_active_profile()
+        self.view._clear_targeting()
         self._publish_sync_assets()
         self._publish_sync_state()
 
@@ -420,11 +461,34 @@ class MainWindow(QMainWindow):
             mode_color = '#90ffb0'
         self._metric["mode"].setText(mode_name)
         self._metric["mode"].setStyleSheet(f"font-size: 15px; font-weight: 700; color: {mode_color};")
-        self._metric["x"].setText(f"{x_value:.1f} m")
-        self._metric["y"].setText(f"{y_value:.1f}°")
+        self._metric["x"].setText(f"{x_value:.1f}")
+        self._metric["y"].setText(f"{y_value:.1f}")
         self._metric["mil"].setText(f"{mil_value:.2f}")
-        self._metric["ang"].setText(f"{angle_value:.1f}°")
-        self._metric["tilt"].setText(f"{tilt_value:.1f}°")
+        self._metric["ang"].setText(f"{angle_value:.1f}")
+        self._metric["tilt"].setText(f"{tilt_value:.1f}")
+
+    def _make_edit_handler(self, key):
+        def handler():
+            text = self._edits[key].text().strip()
+            try:
+                value = float(text)
+            except ValueError:
+                self.view._notify_sidebar()
+                return
+            ok = False
+            if key == "x":
+                ok = self.view.set_distance(value)
+            elif key == "y":
+                ok = self.view.set_azimuth(value)
+            elif key == "mil":
+                ok = self.view.set_mil(value)
+            elif key == "ang":
+                ok = self.view.set_relative_angle(value)
+            elif key == "tilt":
+                ok = self.view.set_tilt(value)
+            if not ok:
+                self.view._notify_sidebar()
+        return handler
 
     def update_sidebar(self, x_value, y_value, mil_value, angle_value, tilt_value=0.0):
         self._update_metric_display(x_value, y_value, mil_value, angle_value, tilt_value)
