@@ -36,6 +36,20 @@ CFG = {
     "PREVIEW_ARROW_SIZE_PX": 50.0,
     "SET_A_MIN_DRAG_PX": 5.0,
 
+    # SPG sector layers
+    "SPG_INNER_SECTOR_COLOR": QColor(0, 180, 255, 60),
+    "SPG_OUTER_SECTOR_COLOR": QColor(0, 180, 255, 30),
+    "SPG_MAX_RANGE_COLOR": QColor(0, 0, 0, 200),
+    "SPG_MAX_RANGE_WIDTH": 8.0,
+    "SPG_DYN_RANGE_COLOR": QColor(255, 0, 0, 180),
+    "SPG_DYN_RANGE_WIDTH": 2.0,
+
+    # SPG sector z-ordering
+    "SPG_INNER_SECTOR_Z": 1.0,
+    "SPG_OUTER_SECTOR_Z": 1.05,
+    "SPG_MAX_RANGE_Z": 0.8,
+    "SPG_DYN_RANGE_Z": 0.85,
+
     # Screen capture & overlay
     "LEFT": 724,
     "RIGHT": 1835,

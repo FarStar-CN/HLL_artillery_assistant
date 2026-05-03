@@ -270,17 +270,17 @@ class MainWindow(QMainWindow):
             dy_az = 0.0
             dy_head = 0.0
             if key_pressed(VK["W"]):
-                dx += self.active_profile.move_speed_x * delta_time
+                dx += self.active_profile.move_speed_mil * delta_time
             if key_pressed(VK["S"]):
-                dx -= self.active_profile.move_speed_x * delta_time
+                dx -= self.active_profile.move_speed_mil * delta_time
             if key_pressed(VK["A"]):
-                dy_az -= self.active_profile.move_speed_y * delta_time
+                dy_az -= self.active_profile.move_speed_ang * delta_time
             if key_pressed(VK["D"]):
-                dy_az += self.active_profile.move_speed_y * delta_time
+                dy_az += self.active_profile.move_speed_ang * delta_time
             if key_pressed(VK["Q"]):
-                dy_head -= self.active_profile.move_speed_y * delta_time
+                dy_head -= self.active_profile.move_speed_heading * delta_time
             if key_pressed(VK["E"]):
-                dy_head += self.active_profile.move_speed_y * delta_time
+                dy_head += self.active_profile.move_speed_heading * delta_time
             if dy_head != 0.0:
                 self.view.adjust_xy(0.0, dy_head, "F2")
             if dx != 0.0 or dy_az != 0.0:
@@ -295,18 +295,18 @@ class MainWindow(QMainWindow):
             if key_pressed(VK["S"]):
                 dx += self.active_profile.move_speed_x * delta_time
             if key_pressed(VK["A"]):
-                dy -= self.active_profile.move_speed_y * delta_time
+                dy -= self.active_profile.move_speed_ang * delta_time
             if key_pressed(VK["D"]):
-                dy += self.active_profile.move_speed_y * delta_time
+                dy += self.active_profile.move_speed_ang * delta_time
             if dx != 0.0 or dy != 0.0:
                 self.view.adjust_xy(dx, dy, self.mode)
             return
 
         dy = 0.0
         if key_pressed(VK["A"]):
-            dy -= self.active_profile.move_speed_y * delta_time
+            dy -= self.active_profile.move_speed_ang * delta_time
         if key_pressed(VK["D"]):
-            dy += self.active_profile.move_speed_y * delta_time
+            dy += self.active_profile.move_speed_ang * delta_time
         if dy != 0.0:
             self.view.adjust_xy(0.0, dy, self.mode)
 

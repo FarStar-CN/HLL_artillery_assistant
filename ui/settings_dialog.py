@@ -46,6 +46,12 @@ TAB_FIELDS = {
         FieldSpec("SECTOR_COLOR",        "Sector Color",              "color", None),
         FieldSpec("PREVIEW_ARROW_SIZE_PX", "Preview Arrow Size (px)", "double_spin", 50.0, (5.0, 200.0), 1),
         FieldSpec("SET_A_MIN_DRAG_PX", "Min Drag to Set A (px)", "double_spin", 5.0, (0.0, 50.0), 1),
+        FieldSpec("SPG_INNER_SECTOR_COLOR", "SPG Inner Sector", "color", None),
+        FieldSpec("SPG_OUTER_SECTOR_COLOR", "SPG Outer Sector", "color", None),
+        FieldSpec("SPG_MAX_RANGE_COLOR", "SPG Max Range Circle", "color", None),
+        FieldSpec("SPG_MAX_RANGE_WIDTH", "SPG Max Range Width", "double_spin", 2.0, (0.5, 10.0), 1),
+        FieldSpec("SPG_DYN_RANGE_COLOR", "SPG Dyn Range Circle", "color", None),
+        FieldSpec("SPG_DYN_RANGE_WIDTH", "SPG Dyn Range Width", "double_spin", 2.0, (0.5, 10.0), 1),
     ],
     "Capture & Overlay": [
         FieldSpec("LEFT",           "Crop Left (px)",           "int_spin",    724,  (0, 9999)),

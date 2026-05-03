@@ -47,6 +47,9 @@ class MapView(QGraphicsView):
         self.b_item = None
         self.line_item = None
         self.sector_item = None
+        self.extended_sector_item = None
+        self.max_range_circle_item = None
+        self.dyn_range_circle_item = None
         self.heading_line_item = None
 
         self.preview_line_item = None
@@ -57,7 +60,7 @@ class MapView(QGraphicsView):
 
         self.pos_a = None
         self.heading_deg = None
-        self._mil_flat = self.active_profile.compute_mil(self.active_profile.max_distance)
+        self._mil_flat = self._default_mil_flat()
         self.azimuth_deg = 0.0
         self.tilt_mil = 0.0
 
@@ -73,6 +76,11 @@ class MapView(QGraphicsView):
         self.shift_locked = False
         self.snapped_angle_deg = None
         self.saved_state = None
+
+    def _default_mil_flat(self):
+        if self.active_profile.mode == "SPG":
+            return 0.0
+        return self.active_profile.compute_mil(self.active_profile.max_distance)
 
     def load_img(self, path):
         QImageReader.setAllocationLimit(0)
@@ -96,6 +104,9 @@ class MapView(QGraphicsView):
         self.b_item = None
         self.line_item = None
         self.sector_item = None
+        self.extended_sector_item = None
+        self.max_range_circle_item = None
+        self.dyn_range_circle_item = None
         self.heading_line_item = None
         self.preview_line_item = None
         self.preview_sector_item = None
@@ -103,7 +114,7 @@ class MapView(QGraphicsView):
 
         self.pos_a = None
         self.heading_deg = None
-        self._mil_flat = self.active_profile.compute_mil(self.active_profile.max_distance)
+        self._mil_flat = self._default_mil_flat()
         self.azimuth_deg = 0.0
         self.tilt_mil = 0.0
 
@@ -477,20 +488,124 @@ class MapView(QGraphicsView):
         if self.pos_a is None or self.heading_deg is None:
             return
 
-        path = self._sector_path(self.pos_a, self.heading_deg)
-        if create or self.sector_item is None:
-            self._remove_item("sector_item")
-            self.sector_item = self.scene().addPath(
-                path,
-                QPen(Qt.NoPen),
-                QBrush(CFG["SECTOR_COLOR"]),
-            )
-            self.sector_item.setZValue(1)
-            return
+        if self._calc_mode == "SPG":
+            inner_r = self._spg_inner_radius()
+            # 1) Inner sector: fixed boundary, accurate linear-formula range
+            inner_path = self._sector_path(self.pos_a, self.heading_deg, inner_r)
+            self._set_or_create_sector("sector_item", inner_path,
+                                       CFG["SPG_INNER_SECTOR_COLOR"], create,
+                                       CFG["SPG_INNER_SECTOR_Z"])
 
-        self.sector_item.setPath(path)
+            # 2) Extended sector: inner_r → dynamic max (grows with tilt)
+            dyn_max = self._spg_dynamic_max_distance()
+            if dyn_max > inner_r:
+                outer_path = self._ring_sector_path(self.pos_a, self.heading_deg,
+                                                    inner_r, dyn_max)
+                self._set_or_create_sector("extended_sector_item", outer_path,
+                                           CFG["SPG_OUTER_SECTOR_COLOR"], create,
+                                           CFG["SPG_OUTER_SECTOR_Z"])
+            else:
+                self._remove_item("extended_sector_item")
+
+            # 3) Max range dashed circle at absolute limit (915m for USA)
+            self._update_max_range_circle()
+
+            # 4) Dynamic range dashed circle at (466+tilt) MIL
+            self._update_dyn_range_circle()
+        else:
+            # STD: single sector at max_distance
+            path = self._sector_path(self.pos_a, self.heading_deg,
+                                     self._effective_max_distance())
+            self._set_or_create_sector("sector_item", path,
+                                       CFG["SECTOR_COLOR"], create, 1.0)
+            self._remove_item("extended_sector_item")
+            self._remove_item("max_range_circle_item")
+            self._remove_item("dyn_range_circle_item")
 
         self._update_heading_line()
+
+    def _set_or_create_sector(self, attr, path, color, create, z_value):
+        item = getattr(self, attr)
+        if create or item is None:
+            self._remove_item(attr)
+            item = self.scene().addPath(path, QPen(Qt.NoPen), QBrush(color))
+            item.setZValue(z_value)
+            setattr(self, attr, item)
+        else:
+            item.setPath(path)
+
+    def _spg_dynamic_max_distance(self):
+        p = self.active_profile
+        abs_max_mil = p.compute_mil(p.max_distance)
+        boundary_mil = p.extended_range[0][0]
+        max_eff_mil = min(p.spg_mil_max + self.tilt_mil, abs_max_mil)
+        return p.inverse_mil(max(max_eff_mil, boundary_mil))
+
+    def _spg_inner_radius(self):
+        return self.active_profile.inverse_mil(
+            self.active_profile.extended_range[0][0]
+        )
+
+    def _range_arc_path(self, radius_m):
+        radius_px = radius_m * self._pixels_per_meter()
+        half = self.active_profile.sector_angle
+        start_angle = self.heading_deg - half
+        end_angle = self.heading_deg + half
+        total_span = 2 * half
+
+        # full circle when sector covers 360°
+        if total_span >= 360.0:
+            path = QPainterPath()
+            path.addEllipse(QPointF(0, 0), radius_px, radius_px)
+            return path
+
+        steps = max(30, int(total_span / 2))
+        path = QPainterPath()
+        # start from origin, go to outer arc at start_angle
+        x, y = compute_target_position(0, 0, radius_px, start_angle, 1.0)
+        path.moveTo(x, y)
+        # radial line from origin to arc start
+        path.lineTo(0, 0)
+        # radial line from origin to arc end
+        x, y = compute_target_position(0, 0, radius_px, end_angle, 1.0)
+        path.lineTo(x, y)
+        # outer arc from end_angle back to start_angle
+        for i in range(steps, -1, -1):
+            angle = start_angle + total_span * i / steps
+            x, y = compute_target_position(0, 0, radius_px, angle, 1.0)
+            path.lineTo(x, y)
+        path.closeSubpath()
+        return path
+
+    def _set_or_create_range_arc(self, attr, radius_m, color_key, width_key, z_value):
+        path = self._range_arc_path(radius_m)
+        item = getattr(self, attr)
+        if path.elementCount() == 0:
+            self._remove_item(attr)
+            return
+        if item is None:
+            self._remove_item(attr)
+            pen = QPen(CFG[color_key], CFG[width_key], Qt.DashLine)
+            item = self.scene().addPath(path, pen)
+            item.setPos(self.pos_a)
+            item.setZValue(z_value)
+            setattr(self, attr, item)
+        else:
+            item.setPath(path)
+            item.setPos(self.pos_a)
+
+    def _update_max_range_circle(self):
+        self._set_or_create_range_arc(
+            "max_range_circle_item", self.active_profile.max_distance,
+            "SPG_MAX_RANGE_COLOR", "SPG_MAX_RANGE_WIDTH", CFG["SPG_MAX_RANGE_Z"],
+        )
+
+    def _update_dyn_range_circle(self):
+        dyn_max = self._spg_dynamic_max_distance()
+        self._set_or_create_range_arc(
+            "dyn_range_circle_item", dyn_max,
+            "SPG_DYN_RANGE_COLOR", "SPG_DYN_RANGE_WIDTH", CFG["SPG_DYN_RANGE_Z"],
+        )
 
     def _update_heading_line(self):
         radius_px = self._effective_max_distance() * self._pixels_per_meter()
@@ -512,8 +627,8 @@ class MapView(QGraphicsView):
             self.pos_a.x(), self.pos_a.y(), end_x, end_y,
         )
 
-    def _sector_path(self, origin, center_angle_deg):
-        radius_px = self._effective_max_distance() * self._pixels_per_meter()
+    def _sector_path(self, origin, center_angle_deg, radius_m):
+        radius_px = radius_m * self._pixels_per_meter()
         start_angle = center_angle_deg - self.active_profile.sector_angle
         end_angle = center_angle_deg + self.active_profile.sector_angle
 
@@ -524,6 +639,30 @@ class MapView(QGraphicsView):
             x, y = compute_target_position(origin.x(), origin.y(), radius_px, angle, 1.0)
             path.lineTo(QPointF(x, y))
 
+        path.closeSubpath()
+        return path
+
+    def _ring_sector_path(self, origin, center_angle_deg, inner_m, outer_m):
+        inner_px = inner_m * self._pixels_per_meter()
+        outer_px = outer_m * self._pixels_per_meter()
+        start_angle = center_angle_deg - self.active_profile.sector_angle
+        end_angle = center_angle_deg + self.active_profile.sector_angle
+
+        path = QPainterPath()
+        # start at inner arc, start_angle
+        x, y = compute_target_position(origin.x(), origin.y(), inner_px, start_angle, 1.0)
+        path.moveTo(x, y)
+        # outer arc (start → end)
+        steps = 60
+        for index in range(steps + 1):
+            angle = start_angle + (end_angle - start_angle) * index / steps
+            x, y = compute_target_position(origin.x(), origin.y(), outer_px, angle, 1.0)
+            path.lineTo(QPointF(x, y))
+        # inner arc (end → start, reverse)
+        for index in range(steps, -1, -1):
+            angle = start_angle + (end_angle - start_angle) * index / steps
+            x, y = compute_target_position(origin.x(), origin.y(), inner_px, angle, 1.0)
+            path.lineTo(QPointF(x, y))
         path.closeSubpath()
         return path
 
@@ -602,7 +741,7 @@ class MapView(QGraphicsView):
     def _update_preview_sector(self, angle_deg):
         preview_color = QColor(CFG["SECTOR_COLOR"])
         preview_color.setAlpha(CFG["PREVIEW_SECTOR_ALPHA"])
-        path = self._sector_path(self.pos_a, angle_deg)
+        path = self._sector_path(self.pos_a, angle_deg, self._effective_max_distance())
 
         if self.preview_sector_item is None:
             self.preview_sector_item = self.scene().addPath(
@@ -622,13 +761,16 @@ class MapView(QGraphicsView):
         self._remove_item("a_item")
         self.pos_a = None
         self.heading_deg = None
-        self._mil_flat = self.active_profile.compute_mil(self.active_profile.max_distance)
+        self._mil_flat = self._default_mil_flat()
         self.azimuth_deg = 0.0
         self.tilt_mil = 0.0
         self._notify_sidebar()
 
     def _clear_committed_target_items(self):
         self._remove_item("sector_item")
+        self._remove_item("extended_sector_item")
+        self._remove_item("max_range_circle_item")
+        self._remove_item("dyn_range_circle_item")
         self._remove_item("b_item")
         self._remove_item("line_item")
         self._remove_item("heading_line_item")
@@ -721,11 +863,7 @@ class MapView(QGraphicsView):
             return False
         if self._calc_mode == "SPG":
             p = self.active_profile
-            eff_low = min(p.compute_mil(p.min_distance), p.compute_mil(p.max_distance))
-            eff_high = max(p.compute_mil(p.min_distance), p.compute_mil(p.max_distance))
-            mil_min = max(p.spg_mil_min, eff_low - self.tilt_mil)
-            mil_max = min(p.spg_mil_max, eff_high - self.tilt_mil)
-            clamped = max(mil_min, min(mil_max, mil_value))
+            clamped = max(p.spg_mil_min, min(p.spg_mil_max, mil_value))
             if abs(clamped - mil_value) > 1e-6:
                 return False
             self._mil_flat = clamped
